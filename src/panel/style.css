@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .btn-primary {
+    @apply block w-full rounded-lg bg-brand text-white text-sm py-2.5 px-4 transition hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply block w-full rounded-md border border-slate-200 bg-slate-100 text-slate-600 text-[13px] py-2 px-3 transition hover:bg-slate-200 hover:text-slate-800 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-add {
+    @apply rounded-md bg-brand text-white text-[13px] px-3 py-2 transition hover:bg-brand-dark;
+  }
+  .input-base {
+    @apply w-full rounded-md border border-slate-200 px-2.5 py-2 text-[13px] outline-none focus:border-brand;
+  }
+  .section-label {
+    @apply block text-[13px] font-semibold text-slate-700 mb-1.5;
+  }
+  .sub-label {
+    @apply block text-xs font-medium text-slate-500 mb-1;
+  }
+  .panel-card {
+    @apply mb-4;
+  }
+}
