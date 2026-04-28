@@ -2,14 +2,7 @@ import { defineConfig, type Plugin, type UserConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { crx } from '@crxjs/vite-plugin';
 import { resolve } from 'node:path';
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import manifest from './src/manifest';
 
 /**
@@ -28,9 +21,11 @@ function flattenPanelDir(): Plugin {
       const manifestPath = resolve(distDir, 'manifest.json');
       if (!existsSync(srcPanel) || !existsSync(manifestPath)) return;
 
+      // Windows 上 renameSync 跨目录 / 目标已存在会 EPERM，
+      // 改成 cpSync(recursive) + rmSync 更稳。
       if (existsSync(dstPanel)) rmSync(dstPanel, { recursive: true, force: true });
-      mkdirSync(dstPanel, { recursive: true });
-      renameSync(srcPanel, dstPanel);
+      cpSync(srcPanel, dstPanel, { recursive: true });
+      rmSync(srcPanel, { recursive: true, force: true });
 
       // 删空的 dist/src（如果只剩它自己）
       try {
