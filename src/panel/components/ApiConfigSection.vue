@@ -27,14 +27,21 @@ watch(searchSite, (v) => {
 });
 const SITES: SearchSite[] = ['cn', 'intl'];
 
-// 搜索触发方式：直跳 / 拟人 / 速填，作用于自动任务循环。
-// 切换在「下一关键词」生效，不会打断当前关键词；切换后下游数据链路（首屏清空、
-// 首页响应等待、pages 累积、回传、计数、已执行标记）保持一致。
+// 搜索触发方式
 const searchTriggerMode = useStorageRef<SearchTriggerMode>(
   STORAGE_KEYS.searchTriggerMode,
   SEARCH_TRIGGER_MODE_DEFAULT,
 );
 const MODES = SEARCH_TRIGGER_MODE_PRIORITY;
+
+// 搜索间隔 & 发布时间筛选（手动顺序搜索 / 自动任务共用）
+const orderedDelayMinSec = useStorageRef<number>(STORAGE_KEYS.orderedExecuteDelayMinSec, 120);
+const orderedDelayMaxSec = useStorageRef<number>(STORAGE_KEYS.orderedExecuteDelayMaxSec, 130);
+const publishTimeFilter = useStorageRef<string>(STORAGE_KEYS.publishTimeFilter, '半年内');
+
+// 可执行时间范围
+const allowedTimeStart = useStorageRef<string>(STORAGE_KEYS.allowedTimeStart, '10:00');
+const allowedTimeEnd = useStorageRef<string>(STORAGE_KEYS.allowedTimeEnd, '21:00');
 </script>
 
 <template>
@@ -82,8 +89,68 @@ const MODES = SEARCH_TRIGGER_MODE_PRIORITY;
         {{ SEARCH_TRIGGER_MODE_LABEL[m] }}
       </button>
     </div>
-    <p class="text-[11px] text-slate-400">
+    <p class="text-[11px] text-slate-400 mb-3">
       {{ SEARCH_TRIGGER_MODE_DESC[searchTriggerMode] }}
     </p>
+
+    <label class="section-label">搜索间隔 & 发布时间筛选（手动与自动任务共用）</label>
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mb-1">
+      <div class="flex flex-nowrap items-center gap-x-2 text-[12px] text-slate-600">
+        <span>间隔（秒，随机）</span>
+        <div class="flex flex-nowrap items-center gap-x-1.5">
+          <label class="inline-flex items-center gap-0.5">
+            <span class="text-slate-500">最小</span>
+            <input
+              v-model.number="orderedDelayMinSec"
+              type="number"
+              min="0"
+              step="1"
+              class="input-base w-12 py-1 px-1 text-[12px] text-center"
+            />
+          </label>
+          <span class="text-slate-400">～</span>
+          <label class="inline-flex items-center gap-0.5">
+            <span class="text-slate-500">最大</span>
+            <input
+              v-model.number="orderedDelayMaxSec"
+              type="number"
+              min="0"
+              step="1"
+              class="input-base w-12 py-1 px-1 text-[12px] text-center"
+            />
+          </label>
+        </div>
+      </div>
+
+      <div class="flex flex-nowrap items-center gap-2 text-[12px] text-slate-600">
+        <span class="shrink-0">发布时间筛选</span>
+        <select
+          v-model="publishTimeFilter"
+          class="shrink-0 px-2 py-1 border border-slate-200 rounded text-[12px] max-w-[7rem]"
+        >
+          <option value="">不筛选</option>
+          <option>一天内</option>
+          <option>一周内</option>
+          <option>半年内</option>
+          <option>一年内</option>
+        </select>
+      </div>
+    </div>
+
+    <label class="section-label">可执行时间范围</label>
+    <div class="flex flex-nowrap items-center gap-x-2 mb-1 text-[12px] text-slate-600">
+      <input
+        v-model="allowedTimeStart"
+        type="time"
+        class="input-base w-[5.5rem] py-1 px-1.5 text-[12px] text-center"
+      />
+      <span class="text-slate-400">～</span>
+      <input
+        v-model="allowedTimeEnd"
+        type="time"
+        class="input-base w-[5.5rem] py-1 px-1.5 text-[12px] text-center"
+      />
+      <span class="text-[11px] text-slate-400">留空则不限制</span>
+    </div>
   </section>
 </template>

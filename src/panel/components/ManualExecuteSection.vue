@@ -17,7 +17,6 @@ import {
 const keywords = keywordStore.list;
 const taskInfoMap = keywordStore.infoMap;
 
-const publishTimeFilter = useStorageRef<string>(STORAGE_KEYS.publishTimeFilter, '半年内');
 const orderedDelayMinSec = useStorageRef<number>(STORAGE_KEYS.orderedExecuteDelayMinSec, 120);
 const orderedDelayMaxSec = useStorageRef<number>(STORAGE_KEYS.orderedExecuteDelayMaxSec, 130);
 const executedKeywords = useStorageRef<string[]>(STORAGE_KEYS.orderedSearchExecutedKeywords, []);
@@ -200,54 +199,8 @@ async function runOrdered() {
   <section class="panel-card">
     <label class="section-label">手动按顺序搜索</label>
     <p class="text-[11px] text-slate-400 mb-2 leading-relaxed">
-      使用「关键词」步骤中的列表；相邻词之间的等待时间为下方随机间隔（与自动任务共用同一组配置）。「发布时间筛选」会作用于后续页面上的搜索筛选逻辑。
+      使用「关键词」步骤中的列表，间隔和筛选项在「配置」模块中设置。
     </p>
-
-    <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3">
-      <div class="flex flex-nowrap items-center gap-x-2 text-[12px] text-slate-600">
-        <span>间隔（秒，随机）</span>
-        <div class="flex flex-nowrap items-center gap-x-1.5 text-[12px] text-slate-600">
-          <label class="inline-flex items-center gap-0.5">
-            <span class="text-slate-500">最小</span>
-            <input
-              v-model.number="orderedDelayMinSec"
-              type="number"
-              min="0"
-              step="1"
-              :disabled="manualOrderedRunning"
-              class="input-base w-12 py-1 px-1 text-[12px] text-center disabled:opacity-50"
-            />
-          </label>
-          <span class="text-slate-400">～</span>
-          <label class="inline-flex items-center gap-0.5">
-            <span class="text-slate-500">最大</span>
-            <input
-              v-model.number="orderedDelayMaxSec"
-              type="number"
-              min="0"
-              step="1"
-              :disabled="manualOrderedRunning"
-              class="input-base w-12 py-1 px-1 text-[12px] text-center disabled:opacity-50"
-            />
-          </label>
-        </div>
-      </div>
-
-      <div class="flex flex-nowrap items-center gap-2 text-[13px] text-slate-500 min-w-0">
-        <span class="shrink-0 whitespace-nowrap">发布时间筛选</span>
-        <select
-          v-model="publishTimeFilter"
-          :disabled="manualOrderedRunning"
-          class="shrink-0 px-2 py-1.5 border border-slate-200 rounded text-[13px] disabled:opacity-50 max-w-[7rem]"
-        >
-          <option value="">不筛选</option>
-          <option>一天内</option>
-          <option>一周内</option>
-          <option>半年内</option>
-          <option>一年内</option>
-        </select>
-      </div>
-    </div>
 
     <button
       type="button"
