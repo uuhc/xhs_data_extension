@@ -21,6 +21,7 @@ import ExecutionLogSection from './components/ExecutionLogSection.vue';
 import NoteTable from './components/NoteTable.vue';
 import CreatorTable from './components/CreatorTable.vue';
 import CollapsibleStep from './components/CollapsibleStep.vue';
+import ImportExportDialog from './components/ImportExportDialog.vue';
 import { accountStore } from './services/accountStore';
 import { keywordStore } from './services/keywordStore';
 import type { AccountCollectStats } from '@/types/xhs';
@@ -363,6 +364,9 @@ const summaryUptime = computed(() => {
 
 // 轻量 toast
 const toast = ref<{ msg: string; type: 'info' | 'error' } | null>(null);
+
+// 导入导出弹窗
+const showImportExportDialog = ref(false);
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 function showToast(msg: string, type: 'info' | 'error' = 'info', duration = 5000) {
   toast.value = { msg, type };
@@ -425,23 +429,35 @@ function reloadExtension() {
           :title="`当前扩展版本 v${version}`"
         >v{{ version }}</span>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-1">
         <button
           type="button"
-          class="flex items-center gap-1 px-2 py-1 rounded border transition-colors text-xs"
+          class="p-1.5 rounded text-slate-400 hover:text-brand hover:bg-slate-100 transition-colors"
+          title="导入/导出配置"
+          @click="showImportExportDialog = true"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="p-1.5 rounded transition-colors"
           :class="pluginPaused
-            ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100 hover:border-green-500'
-            : anyActionRunning
-              ? 'border-red-300 text-red-600 hover:bg-red-50 hover:border-red-500'
-              : 'border-red-200 text-red-500 hover:bg-red-50 hover:border-red-400'"
+            ? 'text-green-600 hover:bg-green-50'
+            : 'text-red-500 hover:bg-red-50'"
           :title="pluginPaused
-            ? '点击恢复插件，允许自动登录 / 自动任务 / 回传 等动作'
-            : '停止所有动作并进入暂停态（不会自动恢复）'"
+            ? '恢复插件'
+            : '停止所有动作'"
           @click="togglePause"
         >
           <svg
             v-if="!pluginPaused"
-            xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
             fill="currentColor" stroke="currentColor" stroke-width="1"
             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
           >
@@ -449,26 +465,24 @@ function reloadExtension() {
           </svg>
           <svg
             v-else
-            xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
             fill="currentColor" stroke="none" aria-hidden="true"
           >
             <path d="M8 5v14l11-7z" />
           </svg>
-          {{ pluginPaused ? '恢复' : '停止' }}
         </button>
         <button
           type="button"
-          class="flex items-center gap-1 px-2 py-1 rounded border border-slate-200 text-slate-500 hover:text-brand hover:border-brand transition-colors text-xs"
-          title="重新加载扩展（开发期：build 后无需手动到 chrome://extensions 点重载）"
+          class="p-1.5 rounded text-slate-400 hover:text-brand hover:bg-slate-100 transition-colors"
+          title="重载扩展"
           @click="reloadExtension"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
                fill="none" stroke="currentColor" stroke-width="2"
                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M21 12a9 9 0 1 1-3-6.7"/>
             <path d="M21 4v5h-5"/>
           </svg>
-          重载
         </button>
       </div>
     </header>
@@ -679,5 +693,8 @@ function reloadExtension() {
         <CreatorTable />
       </template>
     </CollapsibleStep>
+
+    <!-- 导入导出弹窗 -->
+    <ImportExportDialog v-if="showImportExportDialog" @close="showImportExportDialog = false" />
   </main>
 </template>
