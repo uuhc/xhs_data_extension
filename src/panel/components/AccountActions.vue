@@ -165,7 +165,6 @@ async function autoLogout() {
           indexedDB: true,
           localStorage: true,
           serviceWorkers: true,
-          webSQL: true,
           cache: true,
         },
         () => {

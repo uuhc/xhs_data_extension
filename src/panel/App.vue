@@ -203,7 +203,6 @@ async function triggerAutoLogout() {
           indexedDB: true,
           localStorage: true,
           serviceWorkers: true,
-          webSQL: true,
           cache: true,
         },
         () => resolve(),

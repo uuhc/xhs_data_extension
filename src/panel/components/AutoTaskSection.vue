@@ -7,6 +7,8 @@ const autoLoginEnabled = useStorageRef<boolean>(STORAGE_KEYS.autoTaskAutoLoginEn
 const running = useStorageRef<boolean>(STORAGE_KEYS.autoTaskRunning, false);
 const status = useStorageRef<string>(STORAGE_KEYS.autoTaskStatus, '');
 const pluginPaused = useStorageRef<boolean>(STORAGE_KEYS.pluginPaused, false);
+const allowedTimeStart = useStorageRef<string>(STORAGE_KEYS.allowedTimeStart, '10:00');
+const allowedTimeEnd = useStorageRef<string>(STORAGE_KEYS.allowedTimeEnd, '21:00');
 
 function start() {
   try { chrome.runtime.sendMessage({ type: MSG.startAutoTask }, () => { void chrome.runtime.lastError; }); } catch {}
@@ -34,6 +36,22 @@ function stop() {
         <input v-model="autoLoginEnabled" type="checkbox" class="shrink-0" />
         <span class="min-w-0 leading-snug">需要时自动登录（检测到未登录则先登录）</span>
       </label>
+    </div>
+
+    <div class="flex flex-nowrap items-center gap-x-2 mb-2 text-[12px] text-slate-600">
+      <span class="shrink-0 whitespace-nowrap">可执行时间</span>
+      <input
+        v-model="allowedTimeStart"
+        type="time"
+        class="input-base w-[5.5rem] py-1 px-1.5 text-[12px] text-center"
+      />
+      <span class="text-slate-400">～</span>
+      <input
+        v-model="allowedTimeEnd"
+        type="time"
+        class="input-base w-[5.5rem] py-1 px-1.5 text-[12px] text-center"
+      />
+      <span class="text-[11px] text-slate-400">留空则不限制</span>
     </div>
 
     <div class="flex gap-2">

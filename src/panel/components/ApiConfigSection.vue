@@ -3,18 +3,29 @@ import { useStorageRef } from '../composables/useStorageRef';
 import {
   STORAGE_KEYS,
   API_HOST_DEFAULT,
-  SEARCH_SITE_BASE_DEFAULT,
+  SEARCH_SITE_DEFAULT,
+  SEARCH_SITE_URL,
+  SEARCH_SITE_LABEL,
   AUTO_LOGIN_PAGE_DEFAULT,
   SEARCH_TRIGGER_MODE_DEFAULT,
   SEARCH_TRIGGER_MODE_LABEL,
   SEARCH_TRIGGER_MODE_DESC,
   SEARCH_TRIGGER_MODE_PRIORITY,
   type SearchTriggerMode,
+  type SearchSite,
 } from '@shared/constants';
+import { watch } from 'vue';
 
 const apiHost = useStorageRef(STORAGE_KEYS.apiHost, API_HOST_DEFAULT);
-const searchSiteBase = useStorageRef(STORAGE_KEYS.searchSiteBase, SEARCH_SITE_BASE_DEFAULT);
+const searchSite = useStorageRef<SearchSite>(STORAGE_KEYS.searchSite, SEARCH_SITE_DEFAULT);
 const autoLoginPage = useStorageRef(STORAGE_KEYS.autoLoginPage, AUTO_LOGIN_PAGE_DEFAULT);
+
+// 搜索站点切换时同步更新 searchSiteBase（供 background 使用）
+const searchSiteBase = useStorageRef(STORAGE_KEYS.searchSiteBase, SEARCH_SITE_URL[SEARCH_SITE_DEFAULT]);
+watch(searchSite, (v) => {
+  searchSiteBase.value = SEARCH_SITE_URL[v] || SEARCH_SITE_URL[SEARCH_SITE_DEFAULT];
+});
+const SITES: SearchSite[] = ['cn', 'intl'];
 
 // 搜索触发方式：直跳 / 拟人 / 速填，作用于自动任务循环。
 // 切换在「下一关键词」生效，不会打断当前关键词；切换后下游数据链路（首屏清空、
@@ -31,9 +42,24 @@ const MODES = SEARCH_TRIGGER_MODE_PRIORITY;
     <label class="section-label">接口根地址</label>
     <input v-model.lazy="apiHost" class="input-base mb-2" placeholder="https://your-api.example/" />
 
-    <label class="section-label">搜索页地址（仅填站点首页时会自动补全为搜索页）</label>
-    <input v-model.lazy="searchSiteBase" class="input-base mb-2"
-      placeholder="https://www.xiaohongshu.com/search_result?source=web_search_result_notes" />
+    <label class="section-label">搜索页站点</label>
+    <div class="inline-flex rounded border border-slate-200 overflow-hidden mb-1.5" role="radiogroup">
+      <button
+        v-for="s in SITES"
+        :key="s"
+        type="button"
+        role="radio"
+        :aria-checked="s === searchSite"
+        class="px-3 py-1.5 text-[12px] border-r border-slate-200 last:border-r-0 transition-colors"
+        :class="s === searchSite
+          ? 'bg-brand text-white'
+          : 'bg-white text-slate-600 hover:bg-slate-50'"
+        @click="searchSite = s"
+      >
+        {{ SEARCH_SITE_LABEL[s] }}
+      </button>
+    </div>
+    <p class="text-[11px] text-slate-400 mb-2 break-all">{{ SEARCH_SITE_URL[searchSite] }}</p>
 
     <label class="section-label">自动登录打开页（自动登录或弹窗触发时先跳转到此地址）</label>
     <input v-model.lazy="autoLoginPage" class="input-base mb-3" placeholder="https://www.rednote.com" />

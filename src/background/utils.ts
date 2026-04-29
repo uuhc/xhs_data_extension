@@ -128,13 +128,13 @@ export async function getRandomIntervalMs(): Promise<number> {
     STORAGE_KEYS.orderedExecuteDelayMinSec,
     STORAGE_KEYS.orderedExecuteDelayMaxSec,
   ]);
-  let minS = 5;
-  let maxS = 5;
+  let minS = 120;
+  let maxS = 130;
   if (o[STORAGE_KEYS.orderedExecuteDelayMinSec] != null) {
-    minS = Math.max(0, Math.floor(Number(o[STORAGE_KEYS.orderedExecuteDelayMinSec])) || 5);
+    minS = Math.max(0, Math.floor(Number(o[STORAGE_KEYS.orderedExecuteDelayMinSec])) || 120);
   }
   if (o[STORAGE_KEYS.orderedExecuteDelayMaxSec] != null) {
-    maxS = Math.max(0, Math.floor(Number(o[STORAGE_KEYS.orderedExecuteDelayMaxSec])) || 5);
+    maxS = Math.max(0, Math.floor(Number(o[STORAGE_KEYS.orderedExecuteDelayMaxSec])) || 130);
   }
   if (minS > maxS) [minS, maxS] = [maxS, minS];
   const sec = minS + Math.floor(Math.random() * (maxS - minS + 1));
@@ -142,6 +142,48 @@ export async function getRandomIntervalMs(): Promise<number> {
 }
 
 // ---------- 账号采集统计 ----------
+
+/** 解析 'HH:mm' 格式为当日分钟数；不合法返回 null */
+function parseTimeToMinutes(timeStr: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(timeStr.trim());
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 60 + min;
+}
+
+/**
+ * 检查当前时间是否在允许执行的时间范围内。
+ * 支持跨午夜场景（如 22:00-06:00）。
+ * @returns { inRange: boolean, nextChangeMinutes: number }
+ *   nextChangeMinutes: 距离下次状态变更（进入/离开允许范围）的分钟数
+ */
+export function isInAllowedTimeRange(start: string, end: string): { inRange: boolean; nextChangeMinutes: number } {
+  const startMin = parseTimeToMinutes(start);
+  const endMin = parseTimeToMinutes(end);
+  // 格式不合法时默认允许执行
+  if (startMin === null || endMin === null) return { inRange: true, nextChangeMinutes: 60 };
+
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+
+  if (startMin <= endMin) {
+    // 同一天内，如 10:00-21:00
+    const inRange = nowMin >= startMin && nowMin < endMin;
+    const nextChangeMinutes = inRange
+      ? endMin - nowMin
+      : nowMin < startMin ? startMin - nowMin : (24 * 60 - nowMin) + startMin;
+    return { inRange, nextChangeMinutes };
+  } else {
+    // 跨午夜，如 22:00-06:00
+    const inRange = nowMin >= startMin || nowMin < endMin;
+    const nextChangeMinutes = inRange
+      ? (nowMin >= startMin ? (24 * 60 - nowMin) + endMin : endMin - nowMin)
+      : startMin - nowMin;
+    return { inRange, nextChangeMinutes };
+  }
+}
 export function getAccountTodayCollectCount(stats: AccountCollectStats, idx: number): number {
   const key = String(idx);
   const today = getTodayDateStr();

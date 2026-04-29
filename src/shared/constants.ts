@@ -10,9 +10,29 @@ export const GET_KEYWORD_TASK_PATH = 'xhs_extension/get_keyword_task';
 // 默认地址
 export const API_HOST_DEFAULT = 'https://your-api.example/';
 export const API_HOST_PLACEHOLDER = 'https://your-api.example/';
-export const SEARCH_SITE_BASE_DEFAULT =
-  'https://www.xiaohongshu.com/search_result?source=web_search_result_notes';
 export const AUTO_LOGIN_PAGE_DEFAULT = 'https://www.rednote.com';
+
+/**
+ * 搜索页站点：
+ *   - 国内站 cn：https://www.xiaohongshu.com/search_result?source=web_search_result_notes
+ *   - 国际站 intl：https://www.rednote.com/search_result?source=web_search_result_notes
+ * 默认国际站。
+ */
+export type SearchSite = 'cn' | 'intl';
+export const SEARCH_SITE_DEFAULT: SearchSite = 'intl';
+export const SEARCH_SITE_URL: Record<SearchSite, string> = {
+  cn: 'https://www.xiaohongshu.com/search_result?source=web_search_result_notes',
+  intl: 'https://www.rednote.com/search_result?source=web_search_result_notes',
+};
+export const SEARCH_SITE_LABEL: Record<SearchSite, string> = {
+  cn: '国内站',
+  intl: '国际站',
+};
+export function isSearchSite(v: unknown): v is SearchSite {
+  return v === 'cn' || v === 'intl';
+}
+/** 向后兼容：根据 storage 中的 searchSiteBase 反推站点类型，如果无法识别则用默认值 */
+export const SEARCH_SITE_BASE_DEFAULT = SEARCH_SITE_URL[SEARCH_SITE_DEFAULT];
 
 /**
  * 扫码登录支持两个站点（用户可在面板里二选一）：
@@ -41,6 +61,7 @@ export function isQrLoginSite(v: unknown): v is QrLoginSite {
 // storage keys
 export const STORAGE_KEYS = {
   apiHost: 'apiHost',
+  searchSite: 'searchSite',
   searchSiteBase: 'searchSiteBaseUrl',
   autoLoginPage: 'autoLoginPageUrl',
   pluginSearchKeywords: 'pluginSearchKeywords',
@@ -117,6 +138,10 @@ export const STORAGE_KEYS = {
   qrLoginRunning: 'qrLoginRunning',
   /** 扫码登录使用的站点：'cn' | 'intl'；默认 'cn'（国内站 xiaohongshu.com） */
   qrLoginSite: 'qrLoginSite',
+  /** 允许执行任务的开始时间（HH:mm 格式，默认 '10:00'） */
+  allowedTimeStart: 'allowedTimeStart',
+  /** 允许执行任务的结束时间（HH:mm 格式，默认 '21:00'） */
+  allowedTimeEnd: 'allowedTimeEnd',
 } as const;
 
 // ---------- STORAGE_KEYS 分组（纯文档/心智标签，不改变存储位置） ----------
@@ -129,6 +154,7 @@ export const STORAGE_KEYS = {
 /** 持久：用户配置 / 账号 / 接口地址 / 历史统计 */
 export const PERSIST_KEYS = {
   apiHost: STORAGE_KEYS.apiHost,
+  searchSite: STORAGE_KEYS.searchSite,
   searchSiteBase: STORAGE_KEYS.searchSiteBase,
   autoLoginPage: STORAGE_KEYS.autoLoginPage,
   pluginSearchKeywords: STORAGE_KEYS.pluginSearchKeywords,
@@ -153,6 +179,8 @@ export const PERSIST_KEYS = {
   qrLoginDefaultMax: STORAGE_KEYS.qrLoginDefaultMax,
   qrSessionStats: STORAGE_KEYS.qrSessionStats,
   qrLoginSite: STORAGE_KEYS.qrLoginSite,
+  allowedTimeStart: STORAGE_KEYS.allowedTimeStart,
+  allowedTimeEnd: STORAGE_KEYS.allowedTimeEnd,
 } as const;
 
 /** 运行时状态：多进程协调，浏览器重启后需要"恢复到继续运行"的语义 */
@@ -259,7 +287,7 @@ export const SEARCH_TRIGGER_MODE_DESC: Record<SearchTriggerMode, string> = {
  */
 export const SEARCH_TRIGGER_MODE_PRIORITY: SearchTriggerMode[] = ['url', 'human', 'quick'];
 
-export const SEARCH_TRIGGER_MODE_DEFAULT: SearchTriggerMode = 'url';
+export const SEARCH_TRIGGER_MODE_DEFAULT: SearchTriggerMode = 'human';
 
 export function isSearchTriggerMode(v: unknown): v is SearchTriggerMode {
   return v === 'url' || v === 'human' || v === 'quick';

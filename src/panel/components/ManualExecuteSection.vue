@@ -18,8 +18,8 @@ const keywords = keywordStore.list;
 const taskInfoMap = keywordStore.infoMap;
 
 const publishTimeFilter = useStorageRef<string>(STORAGE_KEYS.publishTimeFilter, '半年内');
-const orderedDelayMinSec = useStorageRef<number>(STORAGE_KEYS.orderedExecuteDelayMinSec, 5);
-const orderedDelayMaxSec = useStorageRef<number>(STORAGE_KEYS.orderedExecuteDelayMaxSec, 5);
+const orderedDelayMinSec = useStorageRef<number>(STORAGE_KEYS.orderedExecuteDelayMinSec, 120);
+const orderedDelayMaxSec = useStorageRef<number>(STORAGE_KEYS.orderedExecuteDelayMaxSec, 130);
 const executedKeywords = useStorageRef<string[]>(STORAGE_KEYS.orderedSearchExecutedKeywords, []);
 const pluginPaused = useStorageRef<boolean>(STORAGE_KEYS.pluginPaused, false);
 

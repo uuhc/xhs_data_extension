@@ -28,6 +28,7 @@ import {
   findNextAvailableAccount,
   getAccountTodayCollectCount,
   executeInPageMain,
+  isInAllowedTimeRange,
 } from './utils';
 import {
   isPublishTimeFilterVisible,
@@ -931,6 +932,36 @@ export async function startAutoTaskLoop(opts?: {
     if (autoTaskState.abort) {
       await finishAll();
       return;
+    }
+
+    // ---------- 可执行时间范围检查 ----------
+    if (!resume) {
+      const timeConfig = await storage.get([STORAGE_KEYS.allowedTimeStart, STORAGE_KEYS.allowedTimeEnd]);
+      const timeStart = (timeConfig[STORAGE_KEYS.allowedTimeStart] as string) || '10:00';
+      const timeEnd = (timeConfig[STORAGE_KEYS.allowedTimeEnd] as string) || '21:00';
+      const { inRange, nextChangeMinutes } = isInAllowedTimeRange(timeStart, timeEnd);
+      if (!inRange) {
+        const waitMin = Math.max(nextChangeMinutes, 1);
+        const msg = `当前不在可执行时间（${timeStart}-${timeEnd}），${waitMin}分钟后重新检测`;
+        await setStatus(msg);
+        await pushLog(msg);
+        countdown(true, '等待可执行时间', waitMin * 60);
+        // 等待到下一个检测点，每60秒检查一次是否被abort
+        const totalWaitMs = waitMin * 60 * 1000;
+        const checkIntervalMs = 60_000;
+        let waited = 0;
+        while (waited < totalWaitMs) {
+          if (stale() || autoTaskState.abort) break;
+          const chunk = Math.min(checkIntervalMs, totalWaitMs - waited);
+          await sleep(chunk);
+          waited += chunk;
+        }
+        if (autoTaskState.abort) {
+          await finishAll();
+          return;
+        }
+        continue;
+      }
     }
 
     let keywords: string[];
