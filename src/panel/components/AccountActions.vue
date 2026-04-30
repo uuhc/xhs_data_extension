@@ -11,6 +11,7 @@ import {
 } from '@shared/constants';
 import { useStorageRef } from '../composables/useStorageRef';
 import { accountStore } from '../services/accountStore';
+import { appendLoginLog } from '../state/loginLogState';
 
 const loginMode = useStorageRef<LoginMode>(STORAGE_KEYS.loginMode, LOGIN_MODE_DEFAULT);
 
@@ -22,41 +23,15 @@ const xhsLoggedIn = ref(false);
 const checkingLogin = ref(false);
 const pluginPaused = ref(false);
 
-interface LogEntry {
-  time: number;
-  text: string;
-}
-const logs = ref<LogEntry[]>([]);
-const MAX_LOGS = 8;
-
 function setStatus(text: string, type: 'ok' | 'err' | 'ing' | '' = '') {
   status.value = { text, type };
 }
 
-function appendLog(text: string) {
-  if (!text) return;
-  logs.value = [...logs.value.slice(-(MAX_LOGS - 1)), { time: Date.now(), text }];
-}
-
-function fmtTime(t: number): string {
-  const d = new Date(t);
-  return d.toLocaleTimeString('zh-CN', { hour12: false });
-}
-
-// 监听 background 写到 storage 的进度（autoTaskStatus / autoTaskLogLine / autoLoginRunning）
 function onStorageChanged(
   changes: Record<string, chrome.storage.StorageChange>,
   area: string,
 ) {
   if (area !== 'local') return;
-  const sCh = changes[STORAGE_KEYS.autoTaskStatus];
-  if (sCh && typeof sCh.newValue === 'string' && sCh.newValue) {
-    setStatus(sCh.newValue, 'ing');
-  }
-  const lCh = changes[STORAGE_KEYS.autoTaskLogLine];
-  if (lCh?.newValue && typeof lCh.newValue.text === 'string') {
-    appendLog(lCh.newValue.text);
-  }
   const rCh = changes[STORAGE_KEYS.autoLoginRunning];
   if (rCh) autoLoginRunning.value = !!rCh.newValue;
   const lgCh = changes[STORAGE_KEYS.xhsLoggedIn];
@@ -142,7 +117,7 @@ async function autoLogout() {
       removed++;
     }
   }
-  appendLog(`已删除 Cookie ${removed} 条`);
+  appendLoginLog(`已删除 Cookie ${removed} 条`);
 
   // 2) 清理站点存储（localStorage / IndexedDB / cacheStorage / serviceWorker / cache 等）
   // 仅针对小红书 / Rednote 的 origin，绝不会动其他网站或本扩展数据
@@ -173,9 +148,9 @@ async function autoLogout() {
         },
       ),
     );
-    appendLog(`已清理站点缓存与存储（${origins.length} 个 origin）`);
+    appendLoginLog(`已清理站点缓存与存储（${origins.length} 个 origin）`);
   } catch (e) {
-    appendLog(`清理站点存储失败：${(e as Error).message}`);
+    appendLoginLog(`清理站点存储失败：${(e as Error).message}`);
   }
 
   // 3) 如果当前页面是小红书 / Rednote，刷新一下让登出生效
@@ -183,7 +158,7 @@ async function autoLogout() {
   const tab = tabs[0];
   if (tab?.id && tab.url && /(?:xiaohongshu|rednote)\.com/.test(tab.url)) {
     chrome.tabs.reload(tab.id);
-    appendLog('已刷新当前标签页');
+    appendLoginLog('已刷新当前标签页');
   }
 
   setStatus(`已退出：清除 ${removed} 个 Cookie 与站点缓存`, 'ok');
@@ -219,15 +194,14 @@ async function autoLogin() {
   }
   const tabId = tabs[0].id;
 
-  logs.value = [];
   autoLoginRunning.value = true;
   if (isQr) {
     setStatus('已发起扫码登录…', 'ing');
-    appendLog('【panel】触发扫码登录');
+    appendLoginLog('【panel】触发扫码登录');
   } else {
     const acc = list.value[selectedIdx.value];
     setStatus(`已发起账号 ${selectedIdx.value + 1} 自动登录…`, 'ing');
-    appendLog(`【panel】触发自动登录：账号 ${selectedIdx.value + 1} ${acc?.phone}`);
+    appendLoginLog(`【panel】触发自动登录：账号 ${selectedIdx.value + 1} ${acc?.phone}`);
   }
 
   // 仅发消息触发，由 background 一次性完成（导航 → 等待 → fillPhone → SMS → 登录）
@@ -248,14 +222,14 @@ async function autoLogin() {
       } else if (response?.ok) {
         setStatus(`${label}完成`, 'ok');
       } else {
-        setStatus(`${label}未完成（详见上方日志）`, 'err');
+        setStatus(`${label}未完成（详见「执行日志」）`, 'err');
       }
     },
   );
 }
 
 function cancelAutoLogin() {
-  appendLog('【panel】请求取消自动登录');
+  appendLoginLog('【panel】请求取消自动登录');
   autoLoginRunning.value = false;
   const label = loginMode.value === 'qrcode' ? '扫码登录' : '自动登录';
   setStatus(`${label}已取消`, 'err');
@@ -282,7 +256,6 @@ const loginHintText = computed(() =>
   loginMode.value === 'qrcode' ? '请点击右侧「扫码登录」完成登录' : '请点击右侧「自动登录」完成登录',
 );
 
-void storage;
 </script>
 
 <template>
@@ -374,14 +347,5 @@ void storage;
       }"
     >{{ status.text }}</div>
 
-    <div
-      v-if="logs.length"
-      class="mt-2 max-h-40 overflow-y-auto rounded border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] font-mono leading-relaxed"
-    >
-      <div v-for="(l, i) in logs" :key="i" class="text-slate-600">
-        <span class="text-slate-400">{{ fmtTime(l.time) }}</span>
-        <span class="ml-2">{{ l.text }}</span>
-      </div>
-    </div>
   </section>
 </template>

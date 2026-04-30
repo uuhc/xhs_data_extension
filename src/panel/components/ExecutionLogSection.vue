@@ -3,6 +3,7 @@ import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { useStorageRef } from '../composables/useStorageRef';
 import { STORAGE_KEYS, MSG } from '@shared/constants';
 import { manualOrderedRunLog } from '../state/manualExecuteState';
+import { loginLogs } from '../state/loginLogState';
 
 const autoTaskCallbackStatus = useStorageRef<{ success: boolean; message: string; time: number } | null>(
   STORAGE_KEYS.autoTaskCallbackStatus,
@@ -62,6 +63,7 @@ onMounted(() => {
   nextTick(() => {
     scrollToBottom(autoLogScrollEl.value);
     scrollToBottom(manualLogScrollEl.value);
+    scrollToBottom(loginLogScrollEl.value);
   });
 });
 
@@ -81,7 +83,7 @@ function formatLogTime(at: number): string {
 }
 
 const hasAnyLog = computed(
-  () => manualOrderedRunLog.value.length > 0 || autoTaskLogs.value.length > 0,
+  () => loginLogs.value.length > 0 || manualOrderedRunLog.value.length > 0 || autoTaskLogs.value.length > 0,
 );
 
 // ---------- E3 日志过滤 / 搜索 ----------
@@ -111,6 +113,14 @@ const filteredManualLogs = computed(() => {
   return list.slice().reverse();
 });
 
+const filteredLoginLogs = computed(() => {
+  const kw = logKeyword.value.trim().toLowerCase();
+  const list = kw
+    ? loginLogs.value.filter((r) => (r.line || '').toLowerCase().includes(kw))
+    : loginLogs.value;
+  return list.slice().reverse();
+});
+
 function clearFilter() {
   logKeyword.value = '';
   logTypeFilter.value = 'all';
@@ -123,8 +133,10 @@ function clearFilter() {
 // - 重新滚到底部 → 恢复跟随
 const autoLogScrollEl = ref<HTMLElement | null>(null);
 const manualLogScrollEl = ref<HTMLElement | null>(null);
+const loginLogScrollEl = ref<HTMLElement | null>(null);
 const autoFollowAuto = ref(true);
 const autoFollowManual = ref(true);
+const autoFollowLogin = ref(true);
 
 function isNearBottom(el: HTMLElement, threshold = 8): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
@@ -145,6 +157,11 @@ function onManualLogScroll() {
   if (!el) return;
   autoFollowManual.value = isNearBottom(el);
 }
+function onLoginLogScroll() {
+  const el = loginLogScrollEl.value;
+  if (!el) return;
+  autoFollowLogin.value = isNearBottom(el);
+}
 
 watch(filteredAutoTaskLogs, async () => {
   if (!autoFollowAuto.value) return;
@@ -155,6 +172,11 @@ watch(filteredManualLogs, async () => {
   if (!autoFollowManual.value) return;
   await nextTick();
   scrollToBottom(manualLogScrollEl.value);
+});
+watch(filteredLoginLogs, async () => {
+  if (!autoFollowLogin.value) return;
+  await nextTick();
+  scrollToBottom(loginLogScrollEl.value);
 });
 </script>
 
@@ -187,6 +209,32 @@ watch(filteredManualLogs, async () => {
     </div>
 
     <div v-if="!hasAnyLog" class="text-[12px] text-slate-400 py-2">暂无日志</div>
+
+    <div v-if="filteredLoginLogs.length" class="mb-3 rounded-md border border-slate-100 bg-slate-50/90 px-2.5 py-1.5 relative">
+      <div class="text-[11px] font-medium text-slate-600 mb-1 flex items-center justify-between">
+        <span>登录操作</span>
+        <button
+          v-if="!autoFollowLogin"
+          type="button"
+          class="text-[10px] px-1.5 py-0.5 rounded border border-slate-300 text-slate-500 hover:text-brand hover:border-brand"
+          @click="() => { autoFollowLogin = true; scrollToBottom(loginLogScrollEl); }"
+        >跳到最新 ↓</button>
+      </div>
+      <ul
+        ref="loginLogScrollEl"
+        @scroll="onLoginLogScroll"
+        class="space-y-0.5 text-[11px] text-slate-600 list-none m-0 p-0 max-h-32 overflow-y-auto"
+      >
+        <li
+          v-for="(row, idx) in filteredLoginLogs"
+          :key="`${row.at}-${idx}`"
+          class="truncate leading-snug"
+          :title="row.line"
+        >
+          <span class="text-slate-400 font-mono mr-1">{{ formatLogTime(row.at) }}</span>{{ row.line }}
+        </li>
+      </ul>
+    </div>
 
     <div v-if="filteredManualLogs.length" class="mb-3 rounded-md border border-slate-100 bg-slate-50/90 px-2.5 py-1.5 relative">
       <div class="text-[11px] font-medium text-slate-600 mb-1 flex items-center justify-between">
@@ -247,7 +295,7 @@ watch(filteredManualLogs, async () => {
     </div>
 
     <div
-      v-if="hasAnyLog && !filteredManualLogs.length && !filteredAutoTaskLogs.length"
+      v-if="hasAnyLog && !filteredLoginLogs.length && !filteredManualLogs.length && !filteredAutoTaskLogs.length"
       class="text-[11px] text-slate-400 py-2"
     >
       没有匹配的日志
