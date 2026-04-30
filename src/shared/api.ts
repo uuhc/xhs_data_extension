@@ -10,7 +10,14 @@ import {
 import { fetchWithTimeout } from './fetch';
 import { storage } from './storage';
 import { getTraceId } from './time';
-import type { KeywordTaskInfo, SearchNoteItem } from '@/types/xhs';
+import type { KeywordTaskInfo, SearchNoteItem, AccountItem } from '@/types/xhs';
+
+async function getCurrentPhone(): Promise<string> {
+  const o = await storage.get([STORAGE_KEYS.accountList, STORAGE_KEYS.selectedAccountIndex]);
+  const list: AccountItem[] = o[STORAGE_KEYS.accountList] || [];
+  const idx = parseInt(o[STORAGE_KEYS.selectedAccountIndex], 10) || 0;
+  return (list[idx]?.phone || '').trim();
+}
 
 export async function getApiHost(): Promise<string> {
   const o = await storage.get([STORAGE_KEYS.apiHost]);
@@ -35,7 +42,7 @@ export async function fetchKeywordTask(): Promise<{
   if (isPlaceholderHost(host)) {
     throw new Error('请先在侧栏配置并保存「接口根地址」');
   }
-  const url = host + GET_KEYWORD_TASK_PATH + '?trace_id=20260303';
+  const url = host + GET_KEYWORD_TASK_PATH + '?trace_id=' + encodeURIComponent(getTraceId());
   const maxAttempts = 1 + KEYWORD_TASK_FETCH_RETRIES;
   let lastErr: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -158,10 +165,12 @@ export function parseKeywordTaskResponse(
   return { keywords: [], taskInfos: [] };
 }
 
-/** 构造回传 URL（{apiHost}xhs_extension/add_xhs_app_search_result?trace_id=...） */
+/** 构造回传 URL（{apiHost}xhs_extension/add_xhs_app_search_result?trace_id=...&source=pc_plugin） */
 export async function buildCallbackUrl(): Promise<string> {
   const host = await getApiHost();
-  return host + ADD_SEARCH_RESULT_PATH + '?trace_id=' + encodeURIComponent(getTraceId());
+  const phone = await getCurrentPhone();
+  const params = new URLSearchParams({ trace_id: phone, source: 'pc_plugin' });
+  return host + ADD_SEARCH_RESULT_PATH + '?' + params.toString();
 }
 
 export function buildCallbackBody(
