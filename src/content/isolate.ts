@@ -177,8 +177,10 @@ async function handleSearchResult(msg: SearchResultMessage) {
   // 回传
   const interceptedKeyword = msg.interceptedKeyword || '';
   const k = await storage.get([STORAGE_KEYS.currentKeywordTask]);
-  const kwInfo: KeywordTaskInfo | undefined = k[STORAGE_KEYS.currentKeywordTask];
-  if (!kwInfo || typeof kwInfo !== 'object') return;
+  const kwInfoRaw: KeywordTaskInfo | undefined = k[STORAGE_KEYS.currentKeywordTask];
+  const kwInfo = (kwInfoRaw && typeof kwInfoRaw === 'object')
+    ? kwInfoRaw
+    : { Keywords: interceptedKeyword, Platform: '小红书' } as KeywordTaskInfo;
   const body = buildCallbackBody(kwInfo, items, interceptedKeyword);
 
   const taskKw = kwInfo.Keywords || '';
