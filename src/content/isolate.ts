@@ -178,7 +178,10 @@ async function handleSearchResult(msg: SearchResultMessage) {
   const interceptedKeyword = msg.interceptedKeyword || '';
   const k = await storage.get([STORAGE_KEYS.currentKeywordTask]);
   const kwInfoRaw: KeywordTaskInfo | undefined = k[STORAGE_KEYS.currentKeywordTask];
-  const kwInfo = (kwInfoRaw && typeof kwInfoRaw === 'object')
+  const taskKwMatch = kwInfoRaw && typeof kwInfoRaw === 'object'
+    && interceptedKeyword
+    && (kwInfoRaw.Keywords || '').trim() === interceptedKeyword.trim();
+  const kwInfo = taskKwMatch
     ? kwInfoRaw
     : { Keywords: interceptedKeyword, Platform: '小红书' } as KeywordTaskInfo;
   const body = buildCallbackBody(kwInfo, items, interceptedKeyword);
