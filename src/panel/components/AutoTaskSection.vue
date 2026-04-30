@@ -9,9 +9,11 @@ const status = useStorageRef<string>(STORAGE_KEYS.autoTaskStatus, '');
 const pluginPaused = useStorageRef<boolean>(STORAGE_KEYS.pluginPaused, false);
 
 function start() {
+  running.value = true;
   try { chrome.runtime.sendMessage({ type: MSG.startAutoTask }, () => { void chrome.runtime.lastError; }); } catch {}
 }
 function stop() {
+  running.value = false;
   try { chrome.runtime.sendMessage({ type: MSG.stopAutoTask }, () => { void chrome.runtime.lastError; }); } catch {}
 }
 </script>
