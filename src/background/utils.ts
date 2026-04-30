@@ -79,12 +79,35 @@ export function sendCountdownToPage(
   };
   if (typeof tabId === 'number') {
     send(tabId);
+    if (!show) broadcastCountdownHide();
     return;
   }
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     if (!tabs[0] || !tabs[0].id) return;
     send(tabs[0].id);
   });
+}
+
+/** 向所有小红书标签页广播隐藏倒计时，确保不残留 */
+function broadcastCountdownHide(): void {
+  chrome.tabs.query(
+    { url: ['*://*.xiaohongshu.com/*', '*://*.rednote.com/*'] },
+    (tabs) => {
+      for (const tab of tabs || []) {
+        if (tab.id != null) {
+          try {
+            const p = chrome.tabs.sendMessage(tab.id, {
+              type: MSG.dataCrawlerCountdown,
+              show: false,
+            });
+            if (p && typeof (p as any).catch === 'function') {
+              (p as Promise<unknown>).catch(() => {});
+            }
+          } catch {}
+        }
+      }
+    },
+  );
 }
 
 export function getActiveTab(): Promise<chrome.tabs.Tab | null> {

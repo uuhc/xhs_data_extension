@@ -38,12 +38,17 @@ function stop() {
 
     <div class="flex gap-2">
       <button
+        v-if="!running"
         @click="start"
-        :disabled="running || pluginPaused"
+        :disabled="pluginPaused"
         :title="pluginPaused ? '插件已暂停，请先点右上角「恢复」' : ''"
         class="btn-primary !mb-0 flex-1"
       >启动自动任务</button>
-      <button @click="stop" :disabled="!running" class="btn-secondary !mb-0 flex-1">关闭自动任务</button>
+      <button
+        v-else
+        @click="stop"
+        class="btn-secondary !mb-0 flex-1 !text-red-600 !border-red-300"
+      >关闭自动任务</button>
     </div>
 
     <div v-if="status" class="text-xs text-slate-600 mt-1.5">{{ status }}</div>
