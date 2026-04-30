@@ -151,6 +151,29 @@ async function testCode(idx: number) {
   }
 }
 
+async function resetCount(idx: number) {
+  const key = String(idx);
+  const today = getTodayDateStr();
+  const next = { ...stats.value };
+  if (next[key]) {
+    next[key] = { ...next[key] };
+    delete next[key][today];
+  }
+  await storage.setOne(STORAGE_KEYS.accountCollectStats, next);
+  setStatus(`已重置账号 ${idx + 1} 今日计数`, 'ok');
+}
+
+async function resetQrCount(hash: string) {
+  const today = getTodayDateStr();
+  const next = { ...qrSessions.value };
+  if (next[hash]) {
+    next[hash] = { ...next[hash], daily: { ...next[hash].daily } };
+    delete next[hash].daily[today];
+    await storage.setOne(STORAGE_KEYS.qrSessionStats, next);
+  }
+  setStatus(`已重置 ${hash.slice(0, 8)}… 今日计数`, 'ok');
+}
+
 async function clearStats() {
   if (loginMode.value === 'qrcode') {
     const next: QrSessionStatsMap = {};
@@ -368,6 +391,10 @@ async function removeQrSession(hash: string): Promise<void> {
             class="shrink-0 text-[12px] px-2 py-1 border border-slate-300 rounded text-slate-600 hover:text-brand"
           >测试</button>
           <button
+            @click="resetCount(acc.idx)"
+            class="shrink-0 text-[12px] px-2 py-1 border border-slate-300 rounded text-orange-500 hover:text-brand"
+          >次数重置</button>
+          <button
             @click="removeAt(acc.idx)"
             class="shrink-0 text-[12px] px-2 py-1 border border-slate-300 rounded text-slate-400 hover:text-brand"
           >删除</button>
@@ -443,6 +470,10 @@ async function removeQrSession(hash: string): Promise<void> {
             :placeholder="String(qrLoginDefaultMax || QR_LOGIN_DEFAULT_MAX)"
             title="留空使用全局默认"
           />
+          <button
+            @click="resetQrCount(row.hash)"
+            class="shrink-0 text-[12px] px-2 py-1 border border-slate-300 rounded text-orange-500 hover:text-brand"
+          >次数重置</button>
           <button
             @click="removeQrSession(row.hash)"
             class="shrink-0 text-[12px] px-2 py-1 border border-slate-300 rounded text-slate-400 hover:text-brand"
