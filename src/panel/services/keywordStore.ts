@@ -9,7 +9,7 @@
  *   - 响应式只读视图：list / taskInfoMap / lastFetchedAt
  */
 import { ref, type Ref } from 'vue';
-import { storage } from '@shared/storage';
+import { storage, sessionStore } from '@shared/storage';
 import { STORAGE_KEYS } from '@shared/constants';
 import { fetchKeywordTask } from '@shared/api';
 import { mergeKeywordTaskResultIntoStorage } from '@shared/pluginKeywordsMerge';
@@ -143,12 +143,12 @@ export const keywordStore = {
     let apiResult;
     try {
       apiResult = await fetchKeywordTask();
-      storage
+      sessionStore
         .setOne(STORAGE_KEYS.apiLastProbe, { ok: true, at: Date.now() })
         .catch(() => {});
     } catch (err: any) {
       const msg = err?.message || String(err);
-      storage
+      sessionStore
         .setOne(STORAGE_KEYS.apiLastProbe, { ok: false, at: Date.now(), error: msg })
         .catch(() => {});
       throw err;

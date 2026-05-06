@@ -1,13 +1,16 @@
 import { ref, watch, onMounted, onUnmounted, type Ref } from 'vue';
-import { storage, onLocalStorageChange } from '@shared/storage';
+import { storage, sessionStore, onLocalStorageChange, onSessionStorageChange } from '@shared/storage';
 
 /**
- * 双向绑定 chrome.storage.local 的轻量 ref：
+ * 双向绑定 chrome.storage 的轻量 ref：
  *  - 组件挂载时读初值
  *  - 监听 storage.onChanged 实时同步
  *  - 写入 ref 时自动 storage.set
  *
  * 适合**简单标量 / 单一所有权**的字段（apiHost、autoTaskRunning 等）。
+ *
+ * options.area: 'local'（默认）使用 chrome.storage.local；
+ *               'session' 使用 chrome.storage.session（瞬态数据，浏览器关闭清空）。
  *
  * ⚠️ 不适合需要「先读最新值再追加」的复合数据（账号列表、关键词列表等），
  *     因为 ref.value 不一定反映 storage 最新值（mount race / 多组件并发）。
@@ -16,7 +19,7 @@ import { storage, onLocalStorageChange } from '@shared/storage';
 export function useStorageRef<T>(
   key: string,
   defaultValue: T,
-  options?: { writeOnSet?: boolean; transform?: (raw: any) => T },
+  options?: { writeOnSet?: boolean; transform?: (raw: any) => T; area?: 'local' | 'session' },
 ): Ref<T> {
   const cloneDefault = (): T => {
     try {
@@ -60,8 +63,12 @@ export function useStorageRef<T>(
     }
   };
 
+  const isSession = options?.area === 'session';
+  const store = isSession ? sessionStore : storage;
+  const subscribe = isSession ? onSessionStorageChange : onLocalStorageChange;
+
   async function load() {
-    const raw = await storage.getOne(key);
+    const raw = await store.getOne(key);
     const fromStorage = transform(raw);
     lastSerialized = ser(fromStorage);
     data.value = fromStorage;
@@ -80,7 +87,7 @@ export function useStorageRef<T>(
   let unsubscribe: (() => void) | null = null;
   onMounted(() => {
     load();
-    unsubscribe = onLocalStorageChange(key, onChanged);
+    unsubscribe = subscribe(key, onChanged);
   });
   onUnmounted(() => {
     if (unsubscribe) {
@@ -97,7 +104,7 @@ export function useStorageRef<T>(
         const s = ser(v);
         if (s === lastSerialized) return;
         lastSerialized = s;
-        storage.setOne(key, v);
+        store.setOne(key, v);
       },
       { deep: true },
     );

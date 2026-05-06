@@ -2,10 +2,10 @@
 import { computed } from 'vue';
 import { useStorageRef } from '../composables/useStorageRef';
 import { STORAGE_KEYS } from '@shared/constants';
-import { storage } from '@shared/storage';
+import { sessionStore } from '@shared/storage';
 import type { SearchNotesResponse } from '@/types/xhs';
 
-const pages = useStorageRef<SearchNotesResponse[]>(STORAGE_KEYS.creatorListPages, []);
+const pages = useStorageRef<SearchNotesResponse[]>(STORAGE_KEYS.creatorListPages, [], { area: 'session' });
 
 interface Row {
   pageNum: number;
@@ -61,7 +61,7 @@ const rows = computed<Row[]>(() => {
 });
 
 async function clearTable() {
-  await storage.remove([STORAGE_KEYS.creatorListPages, STORAGE_KEYS.creatorListResult]);
+  await sessionStore.remove([STORAGE_KEYS.creatorListPages, STORAGE_KEYS.creatorListResult]);
 }
 </script>
 

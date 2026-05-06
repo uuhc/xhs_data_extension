@@ -10,11 +10,12 @@ import {
   isSearchTriggerMode,
   type SearchTriggerMode,
 } from '@shared/constants';
-import { storage } from '@shared/storage';
+import { storage, sessionStore } from '@shared/storage';
 import { fetchKeywordTask, getApiHost, isPlaceholderHost } from '@shared/api';
 import { mergeKeywordTaskResultIntoStorage } from '@shared/pluginKeywordsMerge';
 import { getTodayDateStr } from '@shared/time';
 import { isXhsLikeHost } from '@shared/url';
+import { runStorageGC } from '@shared/storage-gc';
 import {
   pushLog,
   setStatus,
@@ -116,6 +117,7 @@ try {
       pendingFirstPage.delete(kw);
       resolver(true);
     } else {
+      if (recentFirstPageHits.size > 100) recentFirstPageHits.clear();
       recentFirstPageHits.add(kw);
     }
   });
@@ -351,7 +353,7 @@ async function scrollAndWaitForPage2(tabId: number): Promise<void> {
   if (autoTaskState.abort) return;
   await sleepJitter(2000);
   if (autoTaskState.abort) return;
-  const res = await storage.get([STORAGE_KEYS.searchNotesPages]);
+  const res = await sessionStore.get([STORAGE_KEYS.searchNotesPages]);
   const pages = res[STORAGE_KEYS.searchNotesPages] || [];
   if (pages.length >= 2) {
     await pushLog(`第二页已自动加载（共${pages.length}页），跳过滚动`);
@@ -366,7 +368,7 @@ async function scrollAndWaitForPage2(tabId: number): Promise<void> {
   await sleepJitter(3000);
   if (autoTaskState.abort) return;
   try {
-    const after = await storage.get([STORAGE_KEYS.searchNotesPages]);
+    const after = await sessionStore.get([STORAGE_KEYS.searchNotesPages]);
     const len = (after[STORAGE_KEYS.searchNotesPages] || []).length;
     if (len < 2) await pushLog('[告警] 第二页未加载（仅 ' + len + ' 页）');
   } catch {}
@@ -639,7 +641,7 @@ async function fetchKeywordsRound(): Promise<
   } catch (err: any) {
     let msg = err?.message || String(err);
     if (msg === 'Failed to fetch') msg = '网络请求失败（请检查接口地址与网络）';
-    await storage
+    await sessionStore
       .setOne(STORAGE_KEYS.apiLastProbe, { ok: false, at: Date.now(), error: msg })
       .catch(() => {});
     const text = `获取任务失败: ${msg}，15 秒后重试`;
@@ -649,7 +651,7 @@ async function fetchKeywordsRound(): Promise<
     await sleep(15000);
     return 'retry';
   }
-  await storage
+  await sessionStore
     .setOne(STORAGE_KEYS.apiLastProbe, { ok: true, at: Date.now() })
     .catch(() => {});
   const { keywords, taskInfos } = result;
@@ -755,7 +757,7 @@ export async function runSearchTriggerWithFallback(
   isAborted: () => boolean,
 ): Promise<'ok' | 'quota' | 'aborted'> {
   // 共享前置：清空上一关键词残留 pages（SPA 模式下 isolate.ts 顶部那段不会再触发）
-  await storage.remove([STORAGE_KEYS.searchNotesPages, STORAGE_KEYS.searchNotesResult]);
+  await sessionStore.remove([STORAGE_KEYS.searchNotesPages, STORAGE_KEYS.searchNotesResult]);
   // 同时清掉上一轮关键词遗留的 hit 缓存，避免跨关键词误命中
   recentFirstPageHits.clear();
 
@@ -898,6 +900,9 @@ export async function startAutoTaskLoop(opts?: {
     return;
   }
 
+  // 清理过期的历史统计数据，避免 storage 无限膨胀
+  await runStorageGC().catch(() => {});
+
   // 记录本次 session 起始时间；resume 场景不覆盖，维持原起始点以便"本次已运行"计时连续
   if (!opts?.resumeFrom) {
     await storage.setOne(STORAGE_KEYS.autoTaskSessionStartAt, Date.now()).catch(() => {});
@@ -916,7 +921,7 @@ export async function startAutoTaskLoop(opts?: {
       [STORAGE_KEYS.countdownRemainSec]: 0,
       [STORAGE_KEYS.autoTaskSessionStartAt]: 0,
     });
-    await storage.remove(STORAGE_KEYS.currentKeywordTask);
+    await sessionStore.remove(STORAGE_KEYS.currentKeywordTask);
     await clearResumeState();
     autoTaskState.workingTabId = null;
   };
@@ -979,7 +984,7 @@ export async function startAutoTaskLoop(opts?: {
         return;
       }
 
-      await storage.remove([STORAGE_KEYS.searchNotesPages, STORAGE_KEYS.searchNotesResult]);
+      await sessionStore.remove([STORAGE_KEYS.searchNotesPages, STORAGE_KEYS.searchNotesResult]);
       const proceed = await preFlightKeywordFetch();
       if (stale()) return;
       if (!proceed) continue;
@@ -1040,7 +1045,7 @@ export async function startAutoTaskLoop(opts?: {
       countdown(true, `执行中 ${index + 1}/${total}`, 0);
 
       const kwInfo = taskInfos[index] || taskInfos[0] || ({ Keywords: keyword } as KeywordTaskInfo);
-      await storage.setOne(STORAGE_KEYS.currentKeywordTask, kwInfo);
+      await sessionStore.setOne(STORAGE_KEYS.currentKeywordTask, kwInfo);
 
       const openRes = await runSearchTriggerWithFallback(
         tab.id!,

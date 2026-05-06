@@ -8,6 +8,7 @@ import { loginLogs } from '../state/loginLogState';
 const autoTaskCallbackStatus = useStorageRef<{ success: boolean; message: string; time: number } | null>(
   STORAGE_KEYS.autoTaskCallbackStatus,
   null,
+  { area: 'session' },
 );
 
 type AutoLogType = 'info' | 'ok' | 'err';
@@ -290,7 +291,7 @@ watch(filteredLoginLogs, async () => {
             'text-red-600': l.type === 'err',
             'text-blue-700': l.type === 'info',
           }"
-        >{{ l.text }}</div>
+        ><span class="text-slate-400 font-mono mr-1">{{ formatLogTime(l.ts) }}</span>{{ l.text }}</div>
       </div>
     </div>
 

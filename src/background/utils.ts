@@ -1,7 +1,7 @@
 // background 通用工具：tab 等待、状态广播、storage 读写、cookie 清理
 
 import { STORAGE_KEYS, MSG } from '@shared/constants';
-import { storage } from '@shared/storage';
+import { storage, sessionStore } from '@shared/storage';
 import { getTodayDateStr } from '@shared/time';
 import {
   normalizeSearchSiteBaseUrl,
@@ -25,28 +25,35 @@ export interface AutoTaskLogEntry {
   text: string;
 }
 const LOG_BUFFER_MAX = 200;
-const logBuffer: AutoTaskLogEntry[] = [];
+const logRing: (AutoTaskLogEntry | null)[] = new Array(LOG_BUFFER_MAX).fill(null);
+let logHead = 0;
+let logCount = 0;
 
 export function pushLog(text: string): Promise<void> {
   if (!text) return Promise.resolve();
   const entry: AutoTaskLogEntry = { time: Date.now(), text };
-  logBuffer.push(entry);
-  if (logBuffer.length > LOG_BUFFER_MAX) {
-    logBuffer.splice(0, logBuffer.length - LOG_BUFFER_MAX);
-  }
+  logRing[logHead] = entry;
+  logHead = (logHead + 1) % LOG_BUFFER_MAX;
+  if (logCount < LOG_BUFFER_MAX) logCount++;
   // 广播（无接收方时 chrome 会报 "Receiving end does not exist"，按静默处理）
   try {
     chrome.runtime.sendMessage({ type: MSG.autoTaskLogEntry, entry }).catch(() => {});
   } catch {}
   // 兼容老行为：依然写入 storage，作为"最后一条"状态，避免影响现有监听方
-  return storage.set({
+  return sessionStore.set({
     [STORAGE_KEYS.autoTaskLogLine]: entry,
   });
 }
 
 /** 读取当前 ring buffer 的快照（最新在后） */
 export function getLogHistory(): AutoTaskLogEntry[] {
-  return logBuffer.slice();
+  if (logCount === 0) return [];
+  const start = logCount < LOG_BUFFER_MAX ? 0 : logHead;
+  const result: AutoTaskLogEntry[] = [];
+  for (let i = 0; i < logCount; i++) {
+    result.push(logRing[(start + i) % LOG_BUFFER_MAX]!);
+  }
+  return result;
 }
 
 /**

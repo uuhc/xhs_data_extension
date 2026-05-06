@@ -220,7 +220,7 @@ export const ALARM_NAMES = {
 export const ORDERED_RUN_LOG_MAX = 3;
 
 // 限制
-export const MAX_PAGES_IN_STORAGE = 50;
+export const MAX_PAGES_IN_STORAGE = 10;
 export const CALLBACK_MAX_RETRIES = 5;
 /** 拉关键词 GET 失败后的重试次数（不含首次）；共最多 1 + N 次请求 */
 export const KEYWORD_TASK_FETCH_RETRIES = 3;

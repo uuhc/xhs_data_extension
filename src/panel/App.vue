@@ -79,6 +79,7 @@ const callbackDailyStats = useStorageRef<Record<string, { ok: number; fail: numb
 const apiLastProbe = useStorageRef<{ ok: boolean; at: number; error?: string } | null>(
   STORAGE_KEYS.apiLastProbe,
   null,
+  { area: 'session' },
 );
 
 // 每秒 tick 供「运行时长」动态刷新；仅在任务运行时开启，空闲时停掉以省性能

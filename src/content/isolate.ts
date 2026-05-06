@@ -7,7 +7,7 @@ import {
   LOGIN_MODE_DEFAULT,
   isLoginMode,
 } from '@shared/constants';
-import { storage } from '@shared/storage';
+import { storage, sessionStore } from '@shared/storage';
 import { incrementQrSessionToday } from '@shared/qrSession';
 import { normalizePublishTime, getTodayDateStr } from '@shared/time';
 import { buildCallbackBody, buildCallbackUrl } from '@shared/api';
@@ -28,10 +28,10 @@ import type {
 
 // ---------- 页面刷新清空当前页相关数据 ----------
 if (location.href.indexOf('search_result') !== -1) {
-  storage.remove([STORAGE_KEYS.searchNotesResult, STORAGE_KEYS.searchNotesPages]);
+  sessionStore.remove([STORAGE_KEYS.searchNotesResult, STORAGE_KEYS.searchNotesPages]);
 }
 if (location.href.indexOf('user/profile') !== -1) {
-  storage.remove([STORAGE_KEYS.creatorListResult, STORAGE_KEYS.creatorListPages]);
+  sessionStore.remove([STORAGE_KEYS.creatorListResult, STORAGE_KEYS.creatorListPages]);
 }
 
 // ---------- 解析单条搜索结果（与 Python add_xhs_app_search_result 一致格式） ----------
@@ -157,7 +157,7 @@ async function handleSearchResult(msg: SearchResultMessage) {
   obj._pageNum = pageNum;
   const isFirstPage = !!msg.isFirstPage;
 
-  const res = await storage.get([STORAGE_KEYS.searchNotesPages]);
+  const res = await sessionStore.get([STORAGE_KEYS.searchNotesPages]);
   let pages: SearchNotesResponse[] = res[STORAGE_KEYS.searchNotesPages] || [];
   if (isFirstPage) {
     pages = [obj];
@@ -169,14 +169,14 @@ async function handleSearchResult(msg: SearchResultMessage) {
     else pages.push(obj);
   }
   if (pages.length > MAX_PAGES_IN_STORAGE) pages = pages.slice(-MAX_PAGES_IN_STORAGE);
-  await storage.set({
+  await sessionStore.set({
     [STORAGE_KEYS.searchNotesPages]: pages,
-    [STORAGE_KEYS.searchNotesResult]: JSON.stringify(obj, null, 2),
+    [STORAGE_KEYS.searchNotesResult]: JSON.stringify(obj),
   });
 
   // 回传
   const interceptedKeyword = msg.interceptedKeyword || '';
-  const k = await storage.get([STORAGE_KEYS.currentKeywordTask]);
+  const k = await sessionStore.get([STORAGE_KEYS.currentKeywordTask]);
   const kwInfoRaw: KeywordTaskInfo | undefined = k[STORAGE_KEYS.currentKeywordTask];
   const taskKwMatch = kwInfoRaw && typeof kwInfoRaw === 'object'
     && interceptedKeyword
@@ -242,7 +242,7 @@ async function handleSearchResult(msg: SearchResultMessage) {
       }
       if (countMsg) {
         console.log('[DataCrawler] ' + countMsg);
-        await storage.set({
+        await sessionStore.set({
           [STORAGE_KEYS.autoTaskLogLine]: {
             time: Date.now(),
             text: '✓ ' + text + ' | ' + countMsg,
@@ -251,7 +251,7 @@ async function handleSearchResult(msg: SearchResultMessage) {
       }
     }
     console.log('[DataCrawler] 搜索数据回传:', text, result);
-    await storage.set({
+    await sessionStore.set({
       [STORAGE_KEYS.autoTaskCallbackStatus]: { success: true, message: text, time: Date.now() },
     });
     // 今日回传成功计数 +1（按日期分桶；所有页都计数，用于观察吞吐）
@@ -287,7 +287,7 @@ async function handleSearchResult(msg: SearchResultMessage) {
     if (kwTag) m += ' ' + kwTag;
     m += ' ' + pageTag;
     console.error('[DataCrawler] 搜索数据回传失败', err);
-    await storage.set({
+    await sessionStore.set({
       [STORAGE_KEYS.autoTaskCallbackStatus]: { success: false, message: m, time: Date.now() },
     });
     try {
@@ -322,7 +322,7 @@ async function handleCreatorResult(msg: CreatorListResultMessage) {
   if (obj) obj._pageNum = pageNum;
   const isFirstPage = !!msg.isFirstPage;
 
-  const res = await storage.get([STORAGE_KEYS.creatorListPages]);
+  const res = await sessionStore.get([STORAGE_KEYS.creatorListPages]);
   let pages: any[] = res[STORAGE_KEYS.creatorListPages] || [];
   if (isFirstPage) {
     pages = [obj];
@@ -333,9 +333,9 @@ async function handleCreatorResult(msg: CreatorListResultMessage) {
     else pages.push(obj);
   }
   if (pages.length > MAX_PAGES_IN_STORAGE) pages = pages.slice(-MAX_PAGES_IN_STORAGE);
-  await storage.set({
+  await sessionStore.set({
     [STORAGE_KEYS.creatorListPages]: pages,
-    [STORAGE_KEYS.creatorListResult]: JSON.stringify(obj, null, 2),
+    [STORAGE_KEYS.creatorListResult]: JSON.stringify(obj),
   });
 }
 
@@ -403,6 +403,7 @@ async function handleCreatorResult(msg: CreatorListResultMessage) {
       // 仅关注与可见性/挂载相关的属性，降低回调频率
       attributeFilter: ['style', 'class', 'hidden'],
     });
+    window.addEventListener('pagehide', () => observer.disconnect(), { once: true });
   }
 
   if (document.readyState === 'loading') {

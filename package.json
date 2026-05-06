@@ -1,12 +1,12 @@
 {
   "name": "xhs-data-extension",
   "private": true,
-  "version": "1.0.91",
+  "version": "2.0.0",
   "type": "module",
   "description": "小红书/红书 数据采集 Chrome 插件",
   "scripts": {
     "dev": "npm run icons && vite",
-    "build": "npm run icons && node scripts/bump-version.mjs && vue-tsc --noEmit && vite build",
+    "build": "npm run icons && vue-tsc --noEmit && vite build",
     "icons": "node scripts/gen-icons.mjs",
     "bump": "node scripts/bump-version.mjs",
     "preview": "vite preview",

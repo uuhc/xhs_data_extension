@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 import { useStorageRef } from '../composables/useStorageRef';
 import { STORAGE_KEYS, MSG } from '@shared/constants';
-import { storage } from '@shared/storage';
+import { storage, sessionStore } from '@shared/storage';
 import { keywordStore } from '../services/keywordStore';
 import type { KeywordTaskInfo } from '@/types/xhs';
 import { watch } from 'vue';
@@ -44,7 +44,7 @@ function scheduleClearCurrentKeywordTask() {
   if (clearKeywordTaskTimer != null) clearTimeout(clearKeywordTaskTimer);
   clearKeywordTaskTimer = setTimeout(() => {
     clearKeywordTaskTimer = null;
-    void storage.remove([STORAGE_KEYS.currentKeywordTask]);
+    void sessionStore.remove([STORAGE_KEYS.currentKeywordTask]);
   }, 120_000);
 }
 
@@ -100,7 +100,7 @@ async function runOrdered() {
     clearTimeout(clearKeywordTaskTimer);
     clearKeywordTaskTimer = null;
   }
-  await storage.remove([STORAGE_KEYS.currentKeywordTask]);
+  await sessionStore.remove([STORAGE_KEYS.currentKeywordTask]);
 
   const queue = keywords.value
     .map((kw, i) => ({ kw, i }))
@@ -129,7 +129,7 @@ async function runOrdered() {
         ...(infoOf(kw) || {}),
         Keywords: kw,
       };
-      await storage.setOne(STORAGE_KEYS.currentKeywordTask, taskInfo);
+      await sessionStore.setOne(STORAGE_KEYS.currentKeywordTask, taskInfo);
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tabs[0]?.id) {
         setStatus('无可用标签页', 'err');

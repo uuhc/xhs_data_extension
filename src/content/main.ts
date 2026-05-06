@@ -9,6 +9,16 @@ import type {
 import type { SearchNotesResponse, SearchNoteItem } from '@/types/xhs';
 
 (function () {
+  // 非目标域的 iframe 无需注入 hook，早期退出减少内存开销
+  if (window !== window.top) {
+    try {
+      const h = location.hostname;
+      if (h.indexOf('xiaohongshu.com') === -1 && h.indexOf('rednote.com') === -1) return;
+    } catch {
+      return;
+    }
+  }
+
   /**
    * HTTPS 页面上请求 http:// 会被浏览器拦截（Mixed Content）。
    * 站点脚本若误写 http 接口，在可同源/可访问的前提下改为 https 再发。

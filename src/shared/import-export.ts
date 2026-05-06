@@ -123,7 +123,9 @@ export interface ExportData {
  */
 export async function exportData(selectedKeys: string[]): Promise<ExportData> {
   const keySet = new Set(selectedKeys);
-  const data = await storage.get(selectedKeys);
+  const allStorageData = await new Promise<Record<string, any>>((resolve) => {
+    chrome.storage.local.get(null, (items) => resolve(items || {}));
+  });
   const groups: Record<string, any> = {};
 
   for (const group of EXPORT_GROUPS) {
@@ -132,13 +134,9 @@ export async function exportData(selectedKeys: string[]): Promise<ExportData> {
 
     const groupData: Record<string, any> = {};
     for (const key of matchedKeys) {
-      if (key in data) {
-        groupData[key] = data[key];
-      }
+      groupData[key] = allStorageData[key] ?? null;
     }
-    if (Object.keys(groupData).length > 0) {
-      groups[group.id] = groupData;
-    }
+    groups[group.id] = groupData;
   }
 
   return {

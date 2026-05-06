@@ -19,6 +19,7 @@ const executedKeywords = useStorageRef<string[]>(STORAGE_KEYS.orderedSearchExecu
 const currentKeywordTask = useStorageRef<KeywordTaskInfo | null>(
   STORAGE_KEYS.currentKeywordTask,
   null,
+  { area: 'session' },
 );
 const autoTaskRunning = useStorageRef<boolean>(STORAGE_KEYS.autoTaskRunning, false);
 const newKw = ref('');

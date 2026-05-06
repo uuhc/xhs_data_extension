@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { ref, computed } from 'vue';
 import { useStorageRef } from '../composables/useStorageRef';
 import { STORAGE_KEYS } from '@shared/constants';
-import { storage } from '@shared/storage';
+import { sessionStore } from '@shared/storage';
 import { normalizePublishTime } from '@shared/time';
 import type { SearchNotesResponse, SearchNoteItem } from '@/types/xhs';
 
-const pages = useStorageRef<SearchNotesResponse[]>(STORAGE_KEYS.searchNotesPages, []);
+const pages = useStorageRef<SearchNotesResponse[]>(STORAGE_KEYS.searchNotesPages, [], { area: 'session' });
+
+const PAGE_SIZE = 20;
+const currentPage = ref(1);
 
 interface Row {
   pageNum: number;
@@ -60,14 +63,31 @@ const rows = computed<Row[]>(() => {
   return list;
 });
 
+const totalPages = computed(() => Math.max(1, Math.ceil(rows.value.length / PAGE_SIZE)));
+const pagedRows = computed(() => {
+  const start = (currentPage.value - 1) * PAGE_SIZE;
+  return rows.value.slice(start, start + PAGE_SIZE);
+});
+
+function prevPage() {
+  if (currentPage.value > 1) currentPage.value--;
+}
+function nextPage() {
+  if (currentPage.value < totalPages.value) currentPage.value++;
+}
+
 async function clearTable() {
-  await storage.remove([STORAGE_KEYS.searchNotesPages, STORAGE_KEYS.searchNotesResult]);
+  currentPage.value = 1;
+  await sessionStore.remove([STORAGE_KEYS.searchNotesPages, STORAGE_KEYS.searchNotesResult]);
 }
 </script>
 
 <template>
   <section class="panel-card">
-    <button @click="clearTable" class="btn-secondary">清空表格数据</button>
+    <div class="flex items-center gap-2">
+      <button @click="clearTable" class="btn-secondary">清空表格数据</button>
+      <span v-if="rows.length" class="text-xs text-slate-500 ml-auto">共 {{ rows.length }} 条</span>
+    </div>
     <div v-if="rows.length" class="mt-3 overflow-auto border border-slate-200 rounded-md">
       <table class="w-full border-collapse text-xs">
         <thead class="sticky top-0 bg-slate-100">
@@ -85,7 +105,7 @@ async function clearTable() {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="r in rows" :key="r.index" class="hover:bg-slate-50">
+          <tr v-for="r in pagedRows" :key="r.index" class="hover:bg-slate-50">
             <td class="px-2 py-1.5 border-b border-slate-100">{{ r.pageNum }}</td>
             <td class="px-2 py-1.5 border-b border-slate-100">{{ r.index }}</td>
             <td class="px-2 py-1.5 border-b border-slate-100 max-w-[180px] truncate" :title="r.title">{{ r.title }}</td>
@@ -101,6 +121,11 @@ async function clearTable() {
           </tr>
         </tbody>
       </table>
+    </div>
+    <div v-if="totalPages > 1" class="flex items-center justify-center gap-3 mt-2 text-xs">
+      <button @click="prevPage" :disabled="currentPage <= 1" class="btn-secondary px-2 py-0.5 disabled:opacity-40">上一页</button>
+      <span class="text-slate-500">{{ currentPage }} / {{ totalPages }}</span>
+      <button @click="nextPage" :disabled="currentPage >= totalPages" class="btn-secondary px-2 py-0.5 disabled:opacity-40">下一页</button>
     </div>
   </section>
 </template>

@@ -21,6 +21,9 @@ import type { AccountItem } from '@/types/xhs';
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
+// 允许 content script（ISOLATED world）访问 chrome.storage.session
+chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' }).catch(() => {});
+
 // ---------- 全局错误捕获 ----------
 // MV3 service worker 是 Module Worker：未捕获的 Promise 拒绝 / 同步异常如果不监听，
 // 仅在 chrome://extensions 的「检查 Service Worker」里看到。这里把它们也送进 ring buffer 日志，
@@ -234,6 +237,13 @@ chrome.runtime.onStartup.addListener(async () => {
 });
 
 // ---------- 消息分发 ----------
+const ALLOW_WHEN_PAUSED = new Set<string>([
+  MSG.stopAutoTask,
+  MSG.abortAutoLogin,
+  MSG.syncLoginStatus,
+  MSG.setPluginPaused,
+]);
+
 chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
   // 「软禁用」总开关：可随时切换，停止 / 恢复均由此入口
   if (msg?.type === MSG.setPluginPaused) {
@@ -262,13 +272,6 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
     return false;
   }
 
-  // 允许的"控制类"消息：无论暂停与否都能执行
-  const ALLOW_WHEN_PAUSED = new Set<string>([
-    MSG.stopAutoTask,
-    MSG.abortAutoLogin,
-    MSG.syncLoginStatus,
-    MSG.setPluginPaused,
-  ]);
   if (pluginPaused && msg?.type && !ALLOW_WHEN_PAUSED.has(msg.type)) {
     // 暂停期间拒绝主动任务 / 回调上报 等；一律静默失败
     try {
