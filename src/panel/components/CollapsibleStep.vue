@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
+import { sessionStore } from '@shared/storage';
 
 type StepStatus = 'idle' | 'doing' | 'done' | 'error' | 'warn';
 
@@ -39,6 +40,21 @@ const props = withDefaults(
 //   后续 status 变化不再自动改变（避免和用户意图打架）。
 const expanded = ref(initialExpanded());
 const userTouched = ref(false);
+
+const STEP_STATE_KEY = 'panelStepExpanded';
+
+onMounted(async () => {
+  const map = await sessionStore.getOne<Record<string, boolean>>(STEP_STATE_KEY);
+  if (map && props.step != null && String(props.step) in map) {
+    expanded.value = map[String(props.step)];
+  }
+});
+
+watch(expanded, async (val) => {
+  const map = (await sessionStore.getOne<Record<string, boolean>>(STEP_STATE_KEY)) || {};
+  map[String(props.step)] = val;
+  await sessionStore.setOne(STEP_STATE_KEY, map);
+});
 
 function initialExpanded(): boolean {
   if (props.defaultExpanded === false) return false;
