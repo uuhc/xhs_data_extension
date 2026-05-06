@@ -134,9 +134,13 @@ export async function exportData(selectedKeys: string[]): Promise<ExportData> {
 
     const groupData: Record<string, any> = {};
     for (const key of matchedKeys) {
-      groupData[key] = allStorageData[key] ?? null;
+      if (key in allStorageData && allStorageData[key] != null) {
+        groupData[key] = allStorageData[key];
+      }
     }
-    groups[group.id] = groupData;
+    if (Object.keys(groupData).length > 0) {
+      groups[group.id] = groupData;
+    }
   }
 
   return {
@@ -274,6 +278,7 @@ export async function importData(
       const groupData = data.groups[groupId];
       for (const key in groupData) {
         if (!ALLOWED_IMPORT_KEYS.has(key)) continue;
+        if (groupData[key] == null) continue;
         toSet[key] = groupData[key];
       }
     }
