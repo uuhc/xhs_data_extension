@@ -1020,6 +1020,17 @@ export async function startAutoTaskLoop(opts?: {
         await finishAll();
         return;
       }
+      // 每个关键词执行前检查是否仍在可执行时间范围，避免跨天时内层循环无感继续
+      {
+        const tc = await storage.get([STORAGE_KEYS.allowedTimeStart, STORAGE_KEYS.allowedTimeEnd]);
+        const ts = (tc[STORAGE_KEYS.allowedTimeStart] as string) || '10:00';
+        const te = (tc[STORAGE_KEYS.allowedTimeEnd] as string) || '21:00';
+        const { inRange } = isInAllowedTimeRange(ts, te);
+        if (!inRange) {
+          await pushLog(`当前不在可执行时间（${ts}-${te}），暂停本轮，等待下次时间窗口`);
+          break;
+        }
+      }
       const keyword = resolveSearchKeyword(keywords[index], taskInfos, index);
       if (!keyword) {
         await pushLog(`第 ${index + 1} 个关键词无效，跳过`);
