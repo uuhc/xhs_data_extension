@@ -5,7 +5,10 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkgPath = resolve(__dirname, '..', 'package.json');
+const root = resolve(__dirname, '..');
+const pkgPath = resolve(root, 'package.json');
+const lockPath = resolve(root, 'package-lock.json');
+
 const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
 
 const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(pkg.version || '');
@@ -17,4 +20,11 @@ const [, major, minor, patch] = m;
 const next = `${major}.${minor}.${Number(patch) + 1}`;
 pkg.version = next;
 writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+
+try {
+  const lock = JSON.parse(readFileSync(lockPath, 'utf8'));
+  lock.version = next;
+  writeFileSync(lockPath, JSON.stringify(lock, null, 2) + '\n');
+} catch {}
+
 console.log(`版本递增 ${m[0]} → ${next}`);
