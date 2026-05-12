@@ -86,13 +86,15 @@ export function sendCountdownToPage(
   };
   if (typeof tabId === 'number') {
     send(tabId);
-    if (!show) broadcastCountdownHide();
-    return;
+  } else {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (!tabs[0] || !tabs[0].id) return;
+      send(tabs[0].id);
+    });
   }
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    if (!tabs[0] || !tabs[0].id) return;
-    send(tabs[0].id);
-  });
+  // hide 时必须广播所有小红书 Tab：否则会话可能早先绑定的 tabId 已不是前台，
+  // 仅发往「当前激活页」将无法停掉 isolation 里的读秒定时器。
+  if (!show) broadcastCountdownHide();
 }
 
 /** 向所有小红书标签页广播隐藏倒计时，确保不残留 */

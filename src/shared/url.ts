@@ -46,3 +46,9 @@ export function getSearchSiteOrigin(base: string): string {
     return 'https://www.xiaohongshu.com';
   }
 }
+
+/** 根据面板配置的搜索站点 URL，得到对应的 explore 首页（国内 xiaohongshu / 国际 rednote 同源）。 */
+export function getConfiguredExploreHomeUrl(raw?: string): string {
+  const base = normalizeSearchSiteBaseUrl(raw);
+  return `${getSearchSiteOrigin(base)}/explore`;
+}

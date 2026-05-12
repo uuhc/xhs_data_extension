@@ -341,12 +341,9 @@ async function removeQrSession(hash: string): Promise<void> {
       <label class="section-label">登录账号（自动登录时使用下方选中的账号）</label>
 
       <div class="max-h-72 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 mb-2">
-        <div v-if="!list.length" class="px-3 py-4 text-xs text-slate-400 text-center">
-          暂无账号
-        </div>
         <div
           v-for="acc in accountsView"
-          :key="acc.phone || `__empty_${acc.idx}`"
+          :key="acc.phone || `__idx_${acc.idx}`"
           class="flex items-start gap-2 px-2.5 py-1.5 border-b border-slate-200 last:border-b-0 text-[13px] transition-colors"
           :class="
             selectedIdx === acc.idx
@@ -366,6 +363,7 @@ async function removeQrSession(hash: string): Promise<void> {
             <input
               class="input-base text-[13px] py-1"
               :value="acc.phone"
+              placeholder="手机号（留空为匿名占位，仍计今日次数；可配合扫码）"
               @change="(e: any) => updateField(acc.idx, 'phone', e.target.value)"
             />
             <input

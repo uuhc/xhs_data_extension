@@ -1,7 +1,8 @@
 // chrome.storage.local 过期数据淘汰：定期清理无限增长的历史统计数据
 
-import { storage } from './storage';
-import { STORAGE_KEYS } from './constants';
+import { ALARM_NAMES, STORAGE_KEYS } from './constants';
+import { getTodayDateStr } from './time';
+import { sessionStore, storage } from './storage';
 
 function pruneDayKeys(obj: Record<string, any>, keepDays: number): boolean {
   const cutoff = new Date();
@@ -52,4 +53,39 @@ export async function runStorageGC(): Promise<void> {
     pruneCallbackDailyStats(),
     pruneExecutedKeywords(),
   ]);
+}
+
+/**
+ * 新日历日时清理「业务临时数据」（不触碰账号 / 登录 / 站点配置 / 关键词配置）。
+ * - session：采集中间产物、最后一行会话日志、回调状态快照、当前任务元数据。
+ * - local：清空「已执行关键词」与任务缓存字典；清除跨日无用的自动任务恢复点。
+ */
+export async function runDailyBusinessDataPrune(): Promise<void> {
+  await sessionStore.remove([
+    STORAGE_KEYS.searchNotesPages,
+    STORAGE_KEYS.searchNotesResult,
+    STORAGE_KEYS.creatorListPages,
+    STORAGE_KEYS.creatorListResult,
+    STORAGE_KEYS.currentKeywordTask,
+    STORAGE_KEYS.autoTaskLogLine,
+    STORAGE_KEYS.autoTaskCallbackStatus,
+  ]);
+  await storage.remove(STORAGE_KEYS.autoTaskResumeState);
+  try {
+    await chrome.alarms.clear(ALARM_NAMES.autoTaskResume);
+  } catch {}
+  await storage.set({
+    [STORAGE_KEYS.orderedSearchExecutedKeywords]: [],
+    [STORAGE_KEYS.pluginKeywordTaskInfos]: {},
+  });
+}
+
+/** 当日仅执行一次日历日清理；返回是否刚执行 */
+export async function maybeRunDailyBusinessPrune(): Promise<boolean> {
+  const today = getTodayDateStr();
+  const last = await storage.getOne<string>(STORAGE_KEYS.autoTaskLastDailyPruneDate);
+  if (last === today) return false;
+  await runDailyBusinessDataPrune();
+  await storage.setOne(STORAGE_KEYS.autoTaskLastDailyPruneDate, today);
+  return true;
 }

@@ -14,8 +14,9 @@ import { storage, sessionStore } from '@shared/storage';
 import { fetchKeywordTask, getApiHost, isPlaceholderHost } from '@shared/api';
 import { mergeKeywordTaskResultIntoStorage } from '@shared/pluginKeywordsMerge';
 import { getTodayDateStr } from '@shared/time';
-import { isXhsLikeHost } from '@shared/url';
-import { runStorageGC } from '@shared/storage-gc';
+import { getConfiguredExploreHomeUrl, isXhsLikeHost } from '@shared/url';
+import { runStorageGC, maybeRunDailyBusinessPrune } from '@shared/storage-gc';
+import { ensureAccountListHydrated } from '@shared/accountListFinalize';
 import {
   pushLog,
   setStatus,
@@ -166,6 +167,47 @@ export async function getSearchTriggerMode(): Promise<SearchTriggerMode> {
  * SPA 模式（拟人 / 速填）需要当前 tab 已经在带搜索框的小红书页。
  * 若不在，自动跳到 explore 主页，等加载完再返回。
  */
+function isAlreadyOnExploreHome(currentUrl: string, exploreHome: string): boolean {
+  try {
+    const cu = new URL(currentUrl);
+    const tu = new URL(exploreHome);
+    if (cu.origin !== tu.origin) return false;
+    const p = (cu.pathname || '/').replace(/\/+$/, '') || '/';
+    return p === '/explore' || p === '';
+  } catch {
+    return false;
+  }
+}
+
+/** 进入工作时间等场景：把当前工作标签拉回配置站点的 explore 首页 */
+async function navigateWorkingTabToConfiguredExploreHome(logPrefix: string): Promise<void> {
+  try {
+    const o = await storage.get([STORAGE_KEYS.searchSiteBase]);
+    const exploreUrl = getConfiguredExploreHomeUrl(o[STORAGE_KEYS.searchSiteBase] as string | undefined);
+    const tab = await resolveWorkingTab();
+    if (!tab?.id) {
+      await pushLog(`${logPrefix}：未找到小红书标签页，跳过首页跳转`);
+      return;
+    }
+    const tabId = tab.id;
+    const cur = tab.url || '';
+    if (isAlreadyOnExploreHome(cur, exploreUrl)) {
+      await pushLog(`${logPrefix}：已在配置站点首页，跳过跳转`);
+      return;
+    }
+    await pushLog(`${logPrefix}：跳转配置站点首页 ${exploreUrl}`);
+    await new Promise<void>((resolve, reject) => {
+      chrome.tabs.update(tabId, { url: exploreUrl }, () => {
+        if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
+        else resolve();
+      });
+    });
+    await waitForTabComplete(tabId);
+  } catch (e: any) {
+    await pushLog(`${logPrefix}：跳转首页失败 ${e?.message || e}`);
+  }
+}
+
 async function ensureOnSearchablePage(tabId: number): Promise<boolean> {
   try {
     const tab = await new Promise<chrome.tabs.Tab>((resolve, reject) => {
@@ -181,10 +223,12 @@ async function ensureOnSearchablePage(tabId: number): Promise<boolean> {
   } catch {
     return false;
   }
+  const o = await storage.get([STORAGE_KEYS.searchSiteBase]);
+  const exploreUrl = getConfiguredExploreHomeUrl(o[STORAGE_KEYS.searchSiteBase] as string | undefined);
   await pushLog('当前页非小红书可搜索页，先跳转到 explore 主页…');
   try {
     await new Promise<void>((resolve, reject) => {
-      chrome.tabs.update(tabId, { url: 'https://www.xiaohongshu.com/explore' }, () => {
+      chrome.tabs.update(tabId, { url: exploreUrl }, () => {
         if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
         else resolve();
       });
@@ -870,6 +914,8 @@ async function waitBetweenKeywords(
         clearInterval(autoTaskState.countdownTimer);
         autoTaskState.countdownTimer = null;
       }
+      // 避免因 interval 与时钟未对齐而把 countdownRemainSec 留在非零
+      storage.setOne(STORAGE_KEYS.countdownRemainSec, 0).catch(() => {});
       resolve();
     }, ms) as unknown as number;
   });
@@ -899,6 +945,8 @@ export async function startAutoTaskLoop(opts?: {
     autoTaskState.running = false;
     return;
   }
+
+  await ensureAccountListHydrated().catch(() => {});
 
   // 清理过期的历史统计数据，避免 storage 无限膨胀
   await runStorageGC().catch(() => {});
@@ -939,34 +987,49 @@ export async function startAutoTaskLoop(opts?: {
       return;
     }
 
-    // ---------- 可执行时间范围检查 ----------
-    if (!resume) {
-      const timeConfig = await storage.get([STORAGE_KEYS.allowedTimeStart, STORAGE_KEYS.allowedTimeEnd]);
-      const timeStart = (timeConfig[STORAGE_KEYS.allowedTimeStart] as string) || '10:00';
-      const timeEnd = (timeConfig[STORAGE_KEYS.allowedTimeEnd] as string) || '21:00';
-      const { inRange, nextChangeMinutes } = isInAllowedTimeRange(timeStart, timeEnd);
-      if (!inRange) {
-        const waitMin = Math.max(nextChangeMinutes, 1);
-        const msg = `当前不在可执行时间（${timeStart}-${timeEnd}），${waitMin}分钟后重新检测`;
-        await setStatus(msg);
-        await pushLog(msg);
-        countdown(true, '等待可执行时间', waitMin * 60);
-        // 等待到下一个检测点，每60秒检查一次是否被abort
-        const totalWaitMs = waitMin * 60 * 1000;
-        const checkIntervalMs = 60_000;
-        let waited = 0;
-        while (waited < totalWaitMs) {
-          if (stale() || autoTaskState.abort) break;
-          const chunk = Math.min(checkIntervalMs, totalWaitMs - waited);
-          await sleep(chunk);
-          waited += chunk;
-        }
-        if (autoTaskState.abort) {
-          await finishAll();
-          return;
-        }
-        continue;
+    const dayPruned = await maybeRunDailyBusinessPrune().catch(() => false);
+    if (dayPruned) {
+      await pushLog(
+        '新日历日：已清理临时采集数据（session）、已执行关键词列表与关键词任务缓存，并作废跨日恢复点',
+      ).catch(() => {});
+    }
+
+    // ---------- 可执行时间范围检查（含 resume / alarm 唤醒：首轮必须与常规循环一致）----------
+    const timeConfig = await storage.get([STORAGE_KEYS.allowedTimeStart, STORAGE_KEYS.allowedTimeEnd]);
+    const timeStart = (timeConfig[STORAGE_KEYS.allowedTimeStart] as string) || '10:00';
+    const timeEnd = (timeConfig[STORAGE_KEYS.allowedTimeEnd] as string) || '21:00';
+    const { inRange, nextChangeMinutes } = isInAllowedTimeRange(timeStart, timeEnd);
+    if (!inRange) {
+      const waitMin = Math.max(nextChangeMinutes, 1);
+      const msg = `当前不在可执行时间（${timeStart}-${timeEnd}），${waitMin}分钟后重新检测`;
+      await setStatus(msg);
+      await pushLog(msg);
+      await storage.setOne(STORAGE_KEYS.countdownRemainSec, 0).catch(() => {});
+      // 页内倒计时与 isolation 同源：必须用「小段」秒数（每段≤60）与本次 sleep(slice) 对齐，
+      // 不可用「距下次开窗还有 N 秒」一整段传给页面，否则会与后台提前检测到进窗脱节。
+      // 侧栏 countdownRemainSec 仍只用于关键词间隔，此处不写 storage。
+      const deadline = Date.now() + waitMin * 60 * 1000;
+      while (Date.now() < deadline) {
+        if (stale() || autoTaskState.abort) break;
+        const again = isInAllowedTimeRange(timeStart, timeEnd);
+        if (again.inRange) break;
+        const slice = Math.min(60_000, Math.max(0, deadline - Date.now()));
+        if (slice <= 0) break;
+        const sliceSec = Math.max(1, Math.ceil(slice / 1000));
+        countdown(true, '等待可执行时间 · 读秒检测', sliceSec);
+        await sleep(slice);
       }
+      countdown(false);
+      await storage.setOne(STORAGE_KEYS.countdownRemainSec, 0).catch(() => {});
+      if (autoTaskState.abort) {
+        await finishAll();
+        return;
+      }
+      // 刚进 10:00–21:00：把工作标签拉回配置站点（国内/国际）explore，再进入本轮任务
+      if (!stale() && isInAllowedTimeRange(timeStart, timeEnd).inRange) {
+        await navigateWorkingTabToConfiguredExploreHome('已进入工作时间');
+      }
+      continue;
     }
 
     let keywords: string[];
@@ -1028,6 +1091,8 @@ export async function startAutoTaskLoop(opts?: {
         const { inRange } = isInAllowedTimeRange(ts, te);
         if (!inRange) {
           await pushLog(`当前不在可执行时间（${ts}-${te}），暂停本轮，等待下次时间窗口`);
+          countdown(false);
+          await storage.setOne(STORAGE_KEYS.countdownRemainSec, 0).catch(() => {});
           break;
         }
       }

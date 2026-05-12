@@ -12,6 +12,10 @@ import { ref, type Ref } from 'vue';
 import { storage } from '@shared/storage';
 import { STORAGE_KEYS } from '@shared/constants';
 import type { AccountItem } from '@/types/xhs';
+import {
+  finalizeAccountList,
+  extractAccountRows,
+} from '@shared/accountListFinalize';
 
 const KEY_LIST = STORAGE_KEYS.accountList;
 const KEY_SELECTED = STORAGE_KEYS.selectedAccountIndex;
@@ -23,17 +27,6 @@ let _initialized = false;
 let _initPromise: Promise<void> | null = null;
 
 // ---------- 工具 ----------
-function normalizeList(raw: any): AccountItem[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((x) => x && typeof x === 'object')
-    .map((x) => ({
-      phone: String(x.phone ?? '').trim(),
-      codeUrl: String(x.codeUrl ?? '').trim(),
-      maxCollectCount: Number.isFinite(+x.maxCollectCount) ? +x.maxCollectCount : 200,
-    }));
-}
-
 function normalizeIdx(raw: any, listLen: number): number {
   const n = Number.isFinite(+raw) ? +raw : 0;
   if (listLen === 0) return 0;
@@ -41,13 +34,20 @@ function normalizeIdx(raw: any, listLen: number): number {
 }
 
 async function readListFromStorage(): Promise<AccountItem[]> {
-  const raw = await storage.getOne<AccountItem[]>(KEY_LIST);
-  return normalizeList(raw);
+  const raw = await storage.getOne<unknown>(KEY_LIST);
+  const finalized = finalizeAccountList(raw);
+  const previous = extractAccountRows(raw);
+  if (JSON.stringify(previous) !== JSON.stringify(finalized)) {
+    await storage.setOne(KEY_LIST, finalized);
+    if (_initialized) _list.value = finalized;
+  }
+  return finalized;
 }
 
 async function writeListToStorage(list: AccountItem[]): Promise<void> {
-  await storage.setOne(KEY_LIST, list);
-  _list.value = list;
+  const finalized = finalizeAccountList(list);
+  await storage.setOne(KEY_LIST, finalized);
+  _list.value = finalized;
 }
 
 async function writeSelectedToStorage(idx: number): Promise<void> {
@@ -72,11 +72,9 @@ function ensureInit(): Promise<void> {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local') return;
       if (KEY_LIST in changes) {
-        const next = normalizeList(changes[KEY_LIST].newValue);
-        // 仅在真正不同时刷 ref，避免无谓的响应式触发
+        const next = finalizeAccountList(changes[KEY_LIST].newValue);
         if (JSON.stringify(next) !== JSON.stringify(_list.value)) {
           _list.value = next;
-          // 列表变了，selectedIdx 可能越界，做一次校正
           const fixed = normalizeIdx(_selectedIdx.value, next.length);
           if (fixed !== _selectedIdx.value) _selectedIdx.value = fixed;
         }
@@ -198,9 +196,9 @@ export const accountStore = {
     next.splice(idx, 1);
     await writeListToStorage(next);
 
-    // selectedIdx 校正：删除导致越界则收回到末尾
+    // selectedIdx 校正：删除导致越界则收回到末尾（finalize 后至少 1 条）
     const curIdx = _selectedIdx.value;
-    const fixed = normalizeIdx(curIdx, next.length);
+    const fixed = normalizeIdx(curIdx, _list.value.length);
     if (fixed !== curIdx) await writeSelectedToStorage(fixed);
   },
 

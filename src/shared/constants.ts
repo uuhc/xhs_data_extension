@@ -142,6 +142,8 @@ export const STORAGE_KEYS = {
   allowedTimeStart: 'allowedTimeStart',
   /** 允许执行任务的结束时间（HH:mm 格式，默认 '21:00'） */
   allowedTimeEnd: 'allowedTimeEnd',
+  /** 上次执行「日历日临时数据清理」的日期 YYYY-MM-DD；与当日相同时跳过 */
+  autoTaskLastDailyPruneDate: 'autoTaskLastDailyPruneDate',
 } as const;
 
 // ---------- STORAGE_KEYS 分组（纯文档/心智标签，不改变存储位置） ----------
@@ -181,6 +183,7 @@ export const PERSIST_KEYS = {
   qrLoginSite: STORAGE_KEYS.qrLoginSite,
   allowedTimeStart: STORAGE_KEYS.allowedTimeStart,
   allowedTimeEnd: STORAGE_KEYS.allowedTimeEnd,
+  autoTaskLastDailyPruneDate: STORAGE_KEYS.autoTaskLastDailyPruneDate,
 } as const;
 
 /** 运行时状态：多进程协调，浏览器重启后需要"恢复到继续运行"的语义 */
