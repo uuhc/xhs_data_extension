@@ -265,6 +265,12 @@ export const MSG = {
    * 响应: { ok: boolean, mode?: SearchTriggerMode, error?: string }
    */
   triggerKeywordSearch: 'triggerKeywordSearch',
+  /**
+   * 任意 context → background：账号 / QR 采集统计的 read-modify-write 操作，
+   * 由 background 单写者队列串行处理，避免「+1」与「重置」并发覆盖。
+   * payload: 详见 src/types/messages.ts StatsOpPayload
+   */
+  statsOp: 'statsOp',
 } as const;
 
 // ---------- 搜索触发模式 ----------

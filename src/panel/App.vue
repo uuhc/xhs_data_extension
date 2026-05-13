@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
+import { computed, ref, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useActiveTabUrl } from './composables/useActiveTabUrl';
 import { useStorageRef } from './composables/useStorageRef';
 import {
@@ -11,6 +11,7 @@ import {
   type SearchTriggerMode,
 } from '@shared/constants';
 import { storage } from '@shared/storage';
+import { getNextAllowedChangeSeconds } from '@shared/time';
 import ApiConfigSection from './components/ApiConfigSection.vue';
 import AccountSection from './components/AccountSection.vue';
 import AccountActions from './components/AccountActions.vue';
@@ -58,7 +59,10 @@ const showCreator = computed(() => pageType.value === 'profile' || pageType.valu
 
 // ---------- 各阶段状态派生 ----------
 const apiHost = useStorageRef<string>(STORAGE_KEYS.apiHost, '');
-const accountStats = useStorageRef<AccountCollectStats>(STORAGE_KEYS.accountCollectStats, {});
+// 顶栏的「今日采集」仅做只读展示；写入走 background statsBroker。
+const accountStats = useStorageRef<AccountCollectStats>(STORAGE_KEYS.accountCollectStats, {}, {
+  writeOnSet: false,
+});
 const xhsLoggedIn = useStorageRef<boolean>(STORAGE_KEYS.xhsLoggedIn, false);
 const autoLoginRunning = useStorageRef<boolean>(STORAGE_KEYS.autoLoginRunning, false);
 const pluginPaused = useStorageRef<boolean>(STORAGE_KEYS.pluginPaused, false);
@@ -72,6 +76,8 @@ const taskRunning = useStorageRef<boolean>(STORAGE_KEYS.autoTaskRunning, false);
 const taskStatus = useStorageRef<string>(STORAGE_KEYS.autoTaskStatus, '');
 const countdownRemainSec = useStorageRef<number>(STORAGE_KEYS.countdownRemainSec, 0);
 const autoTaskSessionStartAt = useStorageRef<number>(STORAGE_KEYS.autoTaskSessionStartAt, 0);
+const allowedTimeStart = useStorageRef<string>(STORAGE_KEYS.allowedTimeStart, '10:00');
+const allowedTimeEnd = useStorageRef<string>(STORAGE_KEYS.allowedTimeEnd, '21:00');
 const callbackDailyStats = useStorageRef<Record<string, { ok: number; fail: number }>>(
   STORAGE_KEYS.callbackDailyStats,
   {},
@@ -82,30 +88,24 @@ const apiLastProbe = useStorageRef<{ ok: boolean; at: number; error?: string } |
   { area: 'session' },
 );
 
-// 每秒 tick 供「运行时长」动态刷新；仅在任务运行时开启，空闲时停掉以省性能
-const uptimeTick = ref(Date.now());
-let uptimeTimer: ReturnType<typeof setInterval> | null = null;
-function ensureUptimeTicker() {
-  const need =
-    (taskRunning.value && autoTaskSessionStartAt.value > 0) || manualOrderedRunning.value;
-  if (need && !uptimeTimer) {
-    uptimeTimer = setInterval(() => (uptimeTick.value = Date.now()), 1000);
-  } else if (!need && uptimeTimer) {
-    clearInterval(uptimeTimer);
-    uptimeTimer = null;
-  }
-}
+// 每秒 tick：用于「运行时长」+「下次工作时间倒计时」+ 其他时间敏感 UI 的动态刷新。
+//
+// 之前用过条件 tick（仅在任务运行 / out-of-window 时启动），存在两个边界 bug：
+//   1) in-window → out-of-window 自然过渡时不会启动（watch 不感知时间流动）；
+//   2) out-of-window → in-window 自然过渡时不会停止（同上）。
+// 改成生命周期常驻 1s tick：每秒只更新一个 number ref，开销可忽略，逻辑简单。
+const nowTick = ref(Date.now());
+let tickTimer: ReturnType<typeof setInterval> | null = null;
 
 onMounted(() => {
   accountStore.init();
   keywordStore.init();
-  ensureUptimeTicker();
+  tickTimer = setInterval(() => (nowTick.value = Date.now()), 1000);
 });
-watch([taskRunning, manualOrderedRunning, autoTaskSessionStartAt], () => ensureUptimeTicker());
 onBeforeUnmount(() => {
-  if (uptimeTimer) {
-    clearInterval(uptimeTimer);
-    uptimeTimer = null;
+  if (tickTimer) {
+    clearInterval(tickTimer);
+    tickTimer = null;
   }
 });
 
@@ -359,8 +359,31 @@ const summaryUptime = computed(() => {
   if (!taskRunning.value) return null;
   const start = autoTaskSessionStartAt.value || 0;
   if (!start) return null;
-  void uptimeTick.value;
+  void nowTick.value;
   return formatDurationShort(Date.now() - start);
+});
+
+// 下次工作窗口倒计时：仅在「当前不在允许时间」时显示一个小卡片。
+// 显示「距开工 hh:mm:ss」，与 background 主循环里的 alarm 唤醒互为冗余但更直观。
+function formatHms(totalSec: number): string {
+  if (totalSec <= 0) return '0:00:00';
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+const nextWorkCard = computed(() => {
+  void nowTick.value;
+  const start = allowedTimeStart.value || '10:00';
+  const end = allowedTimeEnd.value || '21:00';
+  const r = getNextAllowedChangeSeconds(start, end);
+  if (r.inRange) return null;
+  return {
+    start,
+    end,
+    label: formatHms(Math.max(0, r.nextChangeSeconds)),
+  };
 });
 
 // 轻量 toast
@@ -569,6 +592,29 @@ function reloadExtension() {
           </div>
         </template>
       </div>
+    </div>
+
+    <!-- 下次工作时间倒计时小卡片：仅当前不在允许时间窗口时显示 -->
+    <div
+      v-if="nextWorkCard"
+      class="flex items-center gap-2 mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800"
+      :title="`允许执行时间窗口 ${nextWorkCard.start}-${nextWorkCard.end}`"
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" class="shrink-0" aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M12 7v5l3 2"/>
+      </svg>
+      <span class="shrink-0">当前不在工作时间</span>
+      <span class="text-amber-600/80 shrink-0">·</span>
+      <span class="shrink-0">距开工</span>
+      <span class="font-mono font-semibold text-amber-900">{{ nextWorkCard.label }}</span>
+      <span class="ml-auto text-amber-700/80 text-[11px] shrink-0 font-mono">
+        {{ nextWorkCard.start }}-{{ nextWorkCard.end }}
+      </span>
     </div>
 
     <!-- 暂停态横幅：跨整个面板顶部，避免误触发新任务 -->

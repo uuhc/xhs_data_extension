@@ -8,7 +8,6 @@ import {
   isLoginMode,
 } from '@shared/constants';
 import { storage, sessionStore } from '@shared/storage';
-import { incrementQrSessionToday } from '@shared/qrSession';
 import { normalizePublishTime, getTodayDateStr } from '@shared/time';
 import { buildCallbackBody, buildCallbackUrl } from '@shared/api';
 import type {
@@ -16,15 +15,42 @@ import type {
   CreatorListResultMessage,
   SearchFirstPageHitWindowMessage,
   RuntimeMessage,
+  StatsOpPayload,
 } from '@/types/messages';
 import type {
   SearchNotesResponse,
   SearchNoteItem,
   KeywordTaskInfo,
-  AccountItem,
-  AccountCollectStats,
   NoteUser,
 } from '@/types/xhs';
+
+interface StatsOpResponse {
+  ok: boolean;
+  smsIncrement?: { accIdx: number; newCount: number; maxC: number };
+  qrIncrement?: { today: number; max: number } | null;
+  error?: string;
+}
+
+// 把所有「+1」收敛走 background 的 statsBroker：
+//   - read-modify-write 在 SW 串行队列里完成，杜绝并发覆盖；
+//   - sendMessage 在 MV3 会顺带唤醒 SW，所以 SW 被回收时也能跑到。
+function sendStatsOp(payload: StatsOpPayload): Promise<StatsOpResponse | null> {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: MSG.statsOp, payload }, (resp) => {
+        // 检查 lastError 避免控制台爆红：SW 被回收时偶发会 reject。
+        const err = chrome.runtime.lastError;
+        if (err) {
+          resolve(null);
+          return;
+        }
+        resolve((resp as StatsOpResponse) || null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
 
 // ---------- 页面刷新清空当前页相关数据 ----------
 if (location.href.indexOf('search_result') !== -1) {
@@ -206,39 +232,31 @@ async function handleSearchResult(msg: SearchResultMessage) {
       text += ` message=${data.message != null && data.message !== '' ? data.message : '-'}`;
     }
     if (pageNum === 1) {
-      // 跨日临界 fix：
-      // 1) todayStr 放到 set 之前再算一次，避免回传卡几秒后跨过 0 点，把今天的采集数写到昨天的 key 上。
-      // 2) 写入 stats 整体之前重新 get 一次，缩小多 tab 并发覆盖的窗口（read-modify-write）。
+      // +1 全部走 background statsBroker（单写者队列），
+      // 与 panel 的 reset / clearAll 一道严格串行，彻底消除并发覆盖。
       const modeRaw = await storage.getOne(STORAGE_KEYS.loginMode);
       const mode = isLoginMode(modeRaw) ? modeRaw : LOGIN_MODE_DEFAULT;
       let countMsg = '';
       if (mode === 'qrcode') {
         const hash = (await storage.getOne<string>(STORAGE_KEYS.currentQrSessionHash)) || '';
-        if (hash) {
-          const r = await incrementQrSessionToday(hash);
-          if (r) {
-            countMsg = `QR账号 ${hash.slice(0, 8)}… 今日累计采集：${r.today}/${r.max}`;
-          }
-        } else {
+        if (!hash) {
           countMsg = 'QR 模式下未检测到 sessionHash，跳过计数';
+        } else {
+          const r = await sendStatsOp({ kind: 'qr', op: 'increment', hash });
+          if (r?.ok && r.qrIncrement) {
+            countMsg = `QR账号 ${hash.slice(0, 8)}… 今日累计采集：${r.qrIncrement.today}/${r.qrIncrement.max}`;
+          } else {
+            countMsg = `QR 计数失败：${r?.error || 'no_response'}`;
+          }
         }
       } else {
-        const so = await storage.get([
-          STORAGE_KEYS.selectedAccountIndex,
-          STORAGE_KEYS.accountList,
-        ]);
-        const accIdx = parseInt(so[STORAGE_KEYS.selectedAccountIndex], 10) || 0;
-        const accs: AccountItem[] = so[STORAGE_KEYS.accountList] || [];
-        const accKey = String(accIdx);
-        const fresh = await storage.get([STORAGE_KEYS.accountCollectStats]);
-        const stats: AccountCollectStats = fresh[STORAGE_KEYS.accountCollectStats] || {};
-        const todayStr = getTodayDateStr();
-        if (!stats[accKey]) stats[accKey] = {};
-        stats[accKey][todayStr] = (stats[accKey][todayStr] || 0) + 1;
-        const newCount = stats[accKey][todayStr];
-        await storage.set({ [STORAGE_KEYS.accountCollectStats]: stats });
-        const maxC = accs[accIdx]?.maxCollectCount != null ? accs[accIdx].maxCollectCount : 200;
-        countMsg = `账号${accIdx + 1} 今日累计采集：${newCount}/${maxC}`;
+        const r = await sendStatsOp({ kind: 'sms', op: 'increment' });
+        if (r?.ok && r.smsIncrement) {
+          const { accIdx, newCount, maxC } = r.smsIncrement;
+          countMsg = `账号${accIdx + 1} 今日累计采集：${newCount}/${maxC}`;
+        } else {
+          countMsg = `账号计数失败：${r?.error || 'no_response'}`;
+        }
       }
       if (countMsg) {
         console.log('[DataCrawler] ' + countMsg);

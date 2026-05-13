@@ -89,6 +89,10 @@ export async function setQrSessionStats(map: QrSessionStatsMap): Promise<void> {
  *   - 若 hash 尚不存在：初始化 firstSeenAt + 空 daily
  *   - 若已存在：只更新 lastUsedAt
  * 不会覆盖用户配置的 alias / maxCollectCount。
+ *
+ * ⚠️ 不要在新代码里直接调用：与 isolate 的 +1 / 面板的 reset 互覆盖。
+ *    请改用 background/statsBroker.handleStatsOp({ kind: 'qr', op: 'register', hash })。
+ *    保留导出仅为向后兼容、单元测试与脚本使用。
  */
 export async function registerQrSession(hash: string): Promise<void> {
   if (!hash) return;
@@ -139,14 +143,21 @@ export function isQrSessionExceededToday(
 /**
  * 回传一条数据时 +1；同时保证 sessionHash 已注册（防止 isolate 先于 qr-login.ts 写入）。
  * 返回更新后的 today / max，便于 UI 日志展示。
+ *
+ * ⚠️ 不要在新代码里直接调用：与面板 reset / update 互覆盖。
+ *    请改用 background/statsBroker.handleStatsOp({ kind: 'qr', op: 'increment', hash })。
+ *    保留导出仅为向后兼容、单元测试与脚本使用。
  */
 export async function incrementQrSessionToday(
   hash: string,
 ): Promise<{ today: number; max: number } | null> {
   if (!hash) return null;
-  const [map, defaultMax] = await Promise.all([getQrSessionStats(), getQrLoginDefaultMax()]);
+  // 先取 defaultMax（独立 key，不会被 reset 触动）；
+  // map 留到紧贴 set 前再读，最小化与 panel resetQrCount 的竞速窗口。
+  const defaultMax = await getQrLoginDefaultMax();
   const now = Date.now();
   const today = getTodayDateStr();
+  const map = await getQrSessionStats();
   let s: QrSessionStat | undefined = map[hash];
   if (!s) {
     s = { firstSeenAt: now, lastUsedAt: now, daily: {} };

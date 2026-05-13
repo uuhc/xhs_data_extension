@@ -10,6 +10,7 @@ import {
   QR_LOGIN_SITE_DEFAULT,
   QR_LOGIN_SITE_LABEL,
   QR_LOGIN_SITE_DESC,
+  MSG,
   type LoginMode,
   type QrLoginSite,
 } from '@shared/constants';
@@ -18,7 +19,19 @@ import { storage } from '@shared/storage';
 import { extractSmsCode } from '@shared/sms';
 import { getTodayDateStr } from '@shared/time';
 import { accountStore } from '../services/accountStore';
-import type { AccountCollectStats, QrSessionStatsMap, QrSessionStat } from '@/types/xhs';
+import type { AccountCollectStats, QrSessionStatsMap } from '@/types/xhs';
+import type { StatsOpPayload } from '@/types/messages';
+
+// reset / clearAll 改走 background 串行写入队列，
+// 与 isolate 的 +1 严格互斥，杜绝并发覆盖。
+async function sendStatsOp(payload: StatsOpPayload): Promise<{ ok: boolean; error?: string } | null> {
+  try {
+    const r = await chrome.runtime.sendMessage({ type: MSG.statsOp, payload });
+    return (r as any) || null;
+  } catch {
+    return null;
+  }
+}
 
 // 登录模式（决定展示哪种账号列表 + QR 配置面板）
 const loginMode = useStorageRef<LoginMode>(STORAGE_KEYS.loginMode, LOGIN_MODE_DEFAULT);
@@ -33,11 +46,16 @@ const QR_SITES: QrLoginSite[] = ['cn', 'intl'];
 const list = accountStore.list;
 const selectedIdx = accountStore.selectedIdx;
 
-// 采集统计还是用旧的 useStorageRef，简单数据没问题
-const stats = useStorageRef<AccountCollectStats>(STORAGE_KEYS.accountCollectStats, {});
+// 采集统计：写入全部走 background statsBroker，这里仅做只读响应式订阅，
+// writeOnSet=false 显式禁掉 watch 回写，避免未来无意改动 .value 时绕过 broker。
+const stats = useStorageRef<AccountCollectStats>(STORAGE_KEYS.accountCollectStats, {}, {
+  writeOnSet: false,
+});
 
 // QR 模式的 sessionStats / 当前 session / 全局默认 max
-const qrSessions = useStorageRef<QrSessionStatsMap>(STORAGE_KEYS.qrSessionStats, {});
+const qrSessions = useStorageRef<QrSessionStatsMap>(STORAGE_KEYS.qrSessionStats, {}, {
+  writeOnSet: false,
+});
 const currentQrSessionHash = useStorageRef<string>(STORAGE_KEYS.currentQrSessionHash, '');
 const qrLoginDefaultMax = useStorageRef<number>(
   STORAGE_KEYS.qrLoginDefaultMax,
@@ -152,39 +170,25 @@ async function testCode(idx: number) {
 }
 
 async function resetCount(idx: number) {
-  const key = String(idx);
-  const today = getTodayDateStr();
-  const next = { ...stats.value };
-  if (next[key]) {
-    next[key] = { ...next[key] };
-    delete next[key][today];
-  }
-  await storage.setOne(STORAGE_KEYS.accountCollectStats, next);
-  setStatus(`已重置账号 ${idx + 1} 今日计数`, 'ok');
+  const r = await sendStatsOp({ kind: 'sms', op: 'reset', idx });
+  if (r?.ok) setStatus(`已重置账号 ${idx + 1} 今日计数`, 'ok');
+  else setStatus(`重置失败：${r?.error || 'no_response'}`, 'err');
 }
 
 async function resetQrCount(hash: string) {
-  const today = getTodayDateStr();
-  const next = { ...qrSessions.value };
-  if (next[hash]) {
-    next[hash] = { ...next[hash], daily: { ...next[hash].daily } };
-    delete next[hash].daily[today];
-    await storage.setOne(STORAGE_KEYS.qrSessionStats, next);
-  }
-  setStatus(`已重置 ${hash.slice(0, 8)}… 今日计数`, 'ok');
+  const r = await sendStatsOp({ kind: 'qr', op: 'reset', hash });
+  if (r?.ok) setStatus(`已重置 ${hash.slice(0, 8)}… 今日计数`, 'ok');
+  else if (r?.error === 'no_session') setStatus(`${hash.slice(0, 8)}… 暂无统计`, 'err');
+  else setStatus(`重置失败：${r?.error || 'no_response'}`, 'err');
 }
 
 async function clearStats() {
-  if (loginMode.value === 'qrcode') {
-    const next: QrSessionStatsMap = {};
-    for (const [h, s] of Object.entries(qrSessions.value)) {
-      next[h] = { ...s, daily: {} };
-    }
-    await storage.setOne(STORAGE_KEYS.qrSessionStats, next);
-  } else {
-    await storage.setOne(STORAGE_KEYS.accountCollectStats, {});
-  }
-  setStatus('已清空采集统计', 'ok');
+  const r =
+    loginMode.value === 'qrcode'
+      ? await sendStatsOp({ kind: 'qr', op: 'clearAll' })
+      : await sendStatsOp({ kind: 'sms', op: 'clearAll' });
+  if (r?.ok) setStatus('已清空采集统计', 'ok');
+  else setStatus(`清空失败：${r?.error || 'no_response'}`, 'err');
 }
 
 // ---------- QR 模式：sessionStats 列表 ----------
@@ -234,38 +238,26 @@ const qrRows = computed<QrRow[]>(() => {
 });
 
 async function updateQrAlias(hash: string, value: string): Promise<void> {
-  const next = { ...qrSessions.value };
-  const s: QrSessionStat = next[hash]
-    ? { ...next[hash] }
-    : { firstSeenAt: Date.now(), lastUsedAt: Date.now(), daily: {} };
-  s.alias = (value || '').trim();
-  next[hash] = s;
-  await storage.setOne(STORAGE_KEYS.qrSessionStats, next);
+  await sendStatsOp({ kind: 'qr', op: 'update', hash, alias: (value || '').trim() });
 }
 
 async function updateQrMax(hash: string, value: string | number | null | undefined): Promise<void> {
-  const next = { ...qrSessions.value };
-  const s: QrSessionStat = next[hash]
-    ? { ...next[hash] }
-    : { firstSeenAt: Date.now(), lastUsedAt: Date.now(), daily: {} };
-  if (value == null || value === '' || value === '-') {
-    delete s.maxCollectCount;
-  } else {
+  let maxCollectCount: number | null = null;
+  if (value != null && value !== '' && value !== '-') {
     const n = typeof value === 'number' ? value : parseInt(value as string, 10);
-    if (Number.isFinite(n) && n >= 0) s.maxCollectCount = n;
+    if (Number.isFinite(n) && n >= 0) maxCollectCount = n;
+    else return; // 非法值，直接忽略，不写入
   }
-  next[hash] = s;
-  await storage.setOne(STORAGE_KEYS.qrSessionStats, next);
+  await sendStatsOp({ kind: 'qr', op: 'update', hash, maxCollectCount });
 }
 
 async function removeQrSession(hash: string): Promise<void> {
-  const next = { ...qrSessions.value };
-  delete next[hash];
-  await storage.setOne(STORAGE_KEYS.qrSessionStats, next);
+  const r = await sendStatsOp({ kind: 'qr', op: 'remove', hash });
   if (currentQrSessionHash.value === hash) {
     await storage.setOne(STORAGE_KEYS.currentQrSessionHash, '');
   }
-  setStatus(`已删除 ${hash.slice(0, 8)}…`, 'ok');
+  if (r?.ok) setStatus(`已删除 ${hash.slice(0, 8)}…`, 'ok');
+  else setStatus(`删除失败：${r?.error || 'no_response'}`, 'err');
 }
 </script>
 

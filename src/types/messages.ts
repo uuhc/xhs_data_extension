@@ -67,6 +67,34 @@ export interface MsgTriggerKeywordSearch {
   keyword: string;
 }
 
+/**
+ * 中央 stats broker 消息：
+ * 把账号 / QR 采集统计的 read-modify-write 集中到 background 的串行队列，
+ * 彻底消除「面板 reset」与「isolate +1」并发覆盖问题。
+ */
+export type StatsOpPayload =
+  | { kind: 'sms'; op: 'increment' }
+  | { kind: 'sms'; op: 'reset'; idx: number }
+  | { kind: 'sms'; op: 'clearAll' }
+  /** 删除 N 天前的历史日桶，仅 background 内部调用（GC） */
+  | { kind: 'sms'; op: 'pruneOldDays'; keepDays: number }
+  /** 把当前选中账号今日计数强制设为 maxCollectCount（用于 openKeywordUrl 失败时标记今日暂停） */
+  | { kind: 'sms'; op: 'forceQuotaReached' }
+  | { kind: 'qr'; op: 'increment'; hash: string }
+  | { kind: 'qr'; op: 'reset'; hash: string }
+  | { kind: 'qr'; op: 'clearAll' }
+  | { kind: 'qr'; op: 'register'; hash: string }
+  /** 部分更新 session 配置（alias / maxCollectCount）。
+   *  alias 传 null 视为「不变」，传字符串（含空串）则覆盖；
+   *  maxCollectCount 传 null 视为「清除单账号覆盖」，传 number 则覆盖。 */
+  | { kind: 'qr'; op: 'update'; hash: string; alias?: string | null; maxCollectCount?: number | null }
+  | { kind: 'qr'; op: 'remove'; hash: string };
+
+export interface MsgStatsOp {
+  type: 'statsOp';
+  payload: StatsOpPayload;
+}
+
 export type RuntimeMessage =
   | MsgPing
   | MsgCallbackFetch
@@ -76,7 +104,8 @@ export type RuntimeMessage =
   | MsgRunNavigateThenAutoLogin
   | MsgCountdown
   | MsgSearchFirstPageHit
-  | MsgTriggerKeywordSearch;
+  | MsgTriggerKeywordSearch
+  | MsgStatsOp;
 
 // 后端响应：关键词任务
 export interface KeywordTaskResponse {

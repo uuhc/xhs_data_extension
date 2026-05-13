@@ -17,6 +17,7 @@ import { getTodayDateStr } from '@shared/time';
 import { getConfiguredExploreHomeUrl, isXhsLikeHost } from '@shared/url';
 import { runStorageGC, maybeRunDailyBusinessPrune } from '@shared/storage-gc';
 import { ensureAccountListHydrated } from '@shared/accountListFinalize';
+import { handleStatsOp } from './statsBroker';
 import {
   pushLog,
   setStatus,
@@ -275,6 +276,51 @@ async function loadResumeState(): Promise<AutoTaskResumeState | null> {
   return v;
 }
 
+/**
+ * alarm 唤醒标记：
+ *   - 由 onAlarm 在 SW 被冷启后置为 true；
+ *   - 主循环每轮 iter 开头消费一次：发一个 ping 给工作 tab 检测 content script
+ *     是否还能注入；ping 不通时跳 explore 首页强制把脚本注回，避免 alarm 重启
+ *     后落到旧的、已与 SW 断开的页面上盲跑导致首词无回传。
+ * 仅作为「软提示」：即便忘清也最多在下一 iter 多 ping 一次，不影响正确性。
+ */
+let alarmRevivePending = false;
+
+async function pingWorkingTab(timeoutMs = 1500): Promise<boolean> {
+  const tab = await resolveWorkingTab();
+  if (!tab?.id) return false;
+  return await new Promise<boolean>((resolve) => {
+    let done = false;
+    const finish = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    try {
+      chrome.tabs.sendMessage(tab.id!, { type: MSG.dataCrawlerPing }, (resp) => {
+        clearTimeout(timer);
+        const err = chrome.runtime.lastError;
+        if (err || !resp) finish(false);
+        else finish(!!resp.pong);
+      });
+    } catch {
+      clearTimeout(timer);
+      finish(false);
+    }
+  });
+}
+
+async function handleAlarmRevived(): Promise<void> {
+  const ok = await pingWorkingTab();
+  if (ok) {
+    await pushLog('alarm 唤醒：工作标签 content script 健康，继续');
+    return;
+  }
+  await pushLog('alarm 唤醒：工作标签 ping 失败，跳转配置站点首页重注脚本');
+  await navigateWorkingTabToConfiguredExploreHome('alarm 唤醒');
+}
+
 // Chrome 会在 alarm 到期时自动唤醒 SW（或保持活跃时直接触发）。
 // 这里做惰性唤醒入口：只处理恢复 alarm，其他场景交给业务自身。
 try {
@@ -288,10 +334,21 @@ try {
     // 被用户关闭了自动任务（autoTaskRunning=false），忽略
     const running = await storage.getOne(STORAGE_KEYS.autoTaskRunning);
     if (!running) return;
+    // 标记本次启动是 alarm 唤醒，主循环 iter 起始处会做 ping + 必要时跳首页
+    alarmRevivePending = true;
     const state = await loadResumeState();
-    if (!state) return;
-    // SW 重启后从恢复点继续
-    startAutoTaskLoop({ resumeFrom: state }).catch(() => {});
+    if (state) {
+      // SW 重启后从恢复点继续（关键词中途）
+      pushLog(
+        `alarm 唤醒：从恢复点续跑，剩余 ${Math.max(0, state.keywords.length - state.nextIndex)} 个关键词`,
+      ).catch(() => {});
+      startAutoTaskLoop({ resumeFrom: state }).catch(() => {});
+      return;
+    }
+    // 没有恢复点但 autoTaskRunning=true：通常是「非工作时间等待」期间 SW 被回收。
+    // 直接重启主循环，进入后会再次走时间闸 / 拉词流程，不会重复跑已完成的关键词。
+    pushLog('alarm 唤醒：未找到恢复点，重启主循环以继续时间闸/拉词流程').catch(() => {});
+    startAutoTaskLoop().catch(() => {});
   });
 } catch {}
 
@@ -737,22 +794,9 @@ async function openKeywordUrl(
     });
     return 'ok';
   } catch (e: any) {
-    // 打开失败通常是 tab 被关掉 / 跳到了非允许域；这里按"已达今日上限"处理，结束本轮
-    // 跨日临界 fix：写入前重读 stats，并在写入时刻才取 today，避免覆盖/写错日期。
-    const so = await storage.get([
-      STORAGE_KEYS.selectedAccountIndex,
-      STORAGE_KEYS.accountList,
-    ]);
-    const accIdx = parseInt(so[STORAGE_KEYS.selectedAccountIndex], 10) || 0;
-    const accs = so[STORAGE_KEYS.accountList] || [];
-    const maxC = accs[accIdx]?.maxCollectCount != null ? accs[accIdx].maxCollectCount : 200;
-    const accKey = String(accIdx);
-    const fresh = await storage.get([STORAGE_KEYS.accountCollectStats]);
-    const stats = fresh[STORAGE_KEYS.accountCollectStats] || {};
-    const today = getTodayDateStr();
-    if (!stats[accKey]) stats[accKey] = {};
-    stats[accKey][today] = maxC;
-    await storage.set({ [STORAGE_KEYS.accountCollectStats]: stats });
+    // 打开失败通常是 tab 被关掉 / 跳到了非允许域；按"已达今日上限"处理，结束本轮。
+    // 经由 statsBroker 串行写入，与 +1 / reset 互斥，避免被并发覆盖回去。
+    await handleStatsOp({ kind: 'sms', op: 'forceQuotaReached' }).catch(() => {});
     await pushLog(`打开搜索页失败：${e?.message || e}，已标记今日暂停采集`);
     return 'quota';
   }
@@ -948,8 +992,12 @@ export async function startAutoTaskLoop(opts?: {
 
   await ensureAccountListHydrated().catch(() => {});
 
-  // 清理过期的历史统计数据，避免 storage 无限膨胀
-  await runStorageGC().catch(() => {});
+  // 清理过期的历史统计数据，避免 storage 无限膨胀。
+  // accountCollectStats 走 broker 串行队列（与 +1 / reset 互斥），其余 key 直写即可。
+  await Promise.all([
+    runStorageGC().catch(() => {}),
+    handleStatsOp({ kind: 'sms', op: 'pruneOldDays', keepDays: 7 }).catch(() => {}),
+  ]);
 
   // 记录本次 session 起始时间；resume 场景不覆盖，维持原起始点以便"本次已运行"计时连续
   if (!opts?.resumeFrom) {
@@ -1009,6 +1057,15 @@ export async function startAutoTaskLoop(opts?: {
       // 不可用「距下次开窗还有 N 秒」一整段传给页面，否则会与后台提前检测到进窗脱节。
       // 侧栏 countdownRemainSec 仍只用于关键词间隔，此处不写 storage。
       const deadline = Date.now() + waitMin * 60 * 1000;
+      // MV3 SW 在长等待中会被 Chrome 回收：必须用 alarm 在 deadline 前唤醒，
+      // 否则在 0 点等空闲时段 SW 一旦消失，整个非工作时间等待会无声断流。
+      // 注：clearResumeState / waitBetweenKeywords / runDailyBusinessDataPrune 都会
+      // 通过同名 alarm 进行覆盖或清理，所以这里只需 create 一次即可。
+      try {
+        await chrome.alarms.create(ALARM_NAMES.autoTaskResume, {
+          delayInMinutes: Math.max(waitMin, 1 / 60),
+        });
+      } catch {}
       while (Date.now() < deadline) {
         if (stale() || autoTaskState.abort) break;
         const again = isInAllowedTimeRange(timeStart, timeEnd);
@@ -1021,15 +1078,34 @@ export async function startAutoTaskLoop(opts?: {
       }
       countdown(false);
       await storage.setOne(STORAGE_KEYS.countdownRemainSec, 0).catch(() => {});
+      // 等待已被打断（abort / 进窗 / SW 重启续跑），统一把这个 alarm 清掉，
+      // 避免无意义触发；后续 waitBetweenKeywords 会再按需创建新的同名 alarm。
+      try {
+        await chrome.alarms.clear(ALARM_NAMES.autoTaskResume);
+      } catch {}
       if (autoTaskState.abort) {
         await finishAll();
         return;
       }
       // 刚进 10:00–21:00：把工作标签拉回配置站点（国内/国际）explore，再进入本轮任务
       if (!stale() && isInAllowedTimeRange(timeStart, timeEnd).inRange) {
+        // 已经主动跳了首页，等价于完成了 alarm 唤醒所需的"重注脚本"动作，
+        // 防止下面 iter 起始再 ping 一次又跳一次。
+        alarmRevivePending = false;
         await navigateWorkingTabToConfiguredExploreHome('已进入工作时间');
       }
       continue;
+    }
+
+    // 在工作时间内、刚被 alarm 唤醒：ping 一下工作标签确认 content script 还在；
+    // 失败就跳首页强制重注。比无脑跳首页省一次网络加载，比直接盲跑可靠。
+    if (alarmRevivePending) {
+      alarmRevivePending = false;
+      await handleAlarmRevived();
+      if (autoTaskState.abort) {
+        await finishAll();
+        return;
+      }
     }
 
     let keywords: string[];

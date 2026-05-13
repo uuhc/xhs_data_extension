@@ -26,9 +26,9 @@ import {
 import { switchToQrLoginTab, findQrImageDataUrl } from './injected';
 import {
   getCurrentSessionHashFromCookie,
-  registerQrSession,
   setCurrentSessionHash,
 } from '@shared/qrSession';
+import { handleStatsOp } from './statsBroker';
 
 // ---------- 可调常量 ----------
 /** QR 登录整体超时（5 分钟）：超过即认为用户没扫 / 远端没处理 */
@@ -223,7 +223,8 @@ export async function doQrCodeLoginOnTab(
       // 计算 sessionHash 并登记
       const hash = await getCurrentSessionHashFromCookie();
       if (hash) {
-        await registerQrSession(hash);
+        // 经由 statsBroker 串行化，避免与 isolate 的 +1 / 面板的 update/remove 互覆盖
+        await handleStatsOp({ kind: 'qr', op: 'register', hash });
         await setCurrentSessionHash(hash);
         await pushLog(`当前 sessionHash：${hash.slice(0, 8)}…`);
       } else {

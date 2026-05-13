@@ -18,20 +18,6 @@ function pruneDayKeys(obj: Record<string, any>, keepDays: number): boolean {
   return changed;
 }
 
-async function pruneAccountCollectStats(keepDays = 7): Promise<void> {
-  const raw = await storage.getOne<Record<string, Record<string, number>>>(
-    STORAGE_KEYS.accountCollectStats,
-  );
-  if (!raw || typeof raw !== 'object') return;
-  let changed = false;
-  for (const accKey of Object.keys(raw)) {
-    if (raw[accKey] && typeof raw[accKey] === 'object') {
-      if (pruneDayKeys(raw[accKey], keepDays)) changed = true;
-    }
-  }
-  if (changed) await storage.setOne(STORAGE_KEYS.accountCollectStats, raw);
-}
-
 async function pruneCallbackDailyStats(keepDays = 7): Promise<void> {
   const raw = await storage.getOne<Record<string, any>>(STORAGE_KEYS.callbackDailyStats);
   if (!raw || typeof raw !== 'object') return;
@@ -46,13 +32,13 @@ async function pruneExecutedKeywords(maxSize = 2000): Promise<void> {
   await storage.setOne(STORAGE_KEYS.orderedSearchExecutedKeywords, arr.slice(-maxSize));
 }
 
-/** 一次性执行所有清理，适合在自动任务启动时调用 */
+/**
+ * 一次性执行所有清理，适合在自动任务启动时调用。
+ * 注：`accountCollectStats` 的日桶清理由 background/statsBroker.smsPruneOldDays 负责，
+ * 走统计写者串行队列与 +1 / reset 互斥；这里不再直写。
+ */
 export async function runStorageGC(): Promise<void> {
-  await Promise.all([
-    pruneAccountCollectStats(),
-    pruneCallbackDailyStats(),
-    pruneExecutedKeywords(),
-  ]);
+  await Promise.all([pruneCallbackDailyStats(), pruneExecutedKeywords()]);
 }
 
 /**

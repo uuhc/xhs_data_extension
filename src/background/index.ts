@@ -17,6 +17,7 @@ import {
 } from './auto-login';
 import { pushLog, setStatus, executeInPageMain, waitForTabComplete, getLogHistory } from './utils';
 import { checkPageHasLoginDialog, checkXhsLoginUiPresent } from './injected';
+import { handleStatsOp } from './statsBroker';
 import type { AccountItem } from '@/types/xhs';
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
@@ -242,6 +243,9 @@ const ALLOW_WHEN_PAUSED = new Set<string>([
   MSG.abortAutoLogin,
   MSG.syncLoginStatus,
   MSG.setPluginPaused,
+  // 暂停期间用户仍可能想点重置 / 清零，且 isolate 已有的 inflight +1 也要落账；
+  // 让 stats 通道独立于「主动任务」开关，保持与旧版本「直写 storage」一致的行为。
+  MSG.statsOp,
 ]);
 
 chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
@@ -352,6 +356,20 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
         sendResponse({ ok: false, error: summarizeError(e) });
       }
     })();
+    return true; // 异步 sendResponse
+  }
+  if (msg?.type === MSG.statsOp && msg?.payload) {
+    handleStatsOp(msg.payload)
+      .then((r) => {
+        try {
+          sendResponse(r);
+        } catch {}
+      })
+      .catch((e) => {
+        try {
+          sendResponse({ ok: false, error: summarizeError(e) });
+        } catch {}
+      });
     return true; // 异步 sendResponse
   }
   return handleCallbackFetch(msg, sendResponse);
