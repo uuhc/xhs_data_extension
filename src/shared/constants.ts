@@ -138,10 +138,25 @@ export const STORAGE_KEYS = {
   qrLoginRunning: 'qrLoginRunning',
   /** 扫码登录使用的站点：'cn' | 'intl'；默认 'cn'（国内站 xiaohongshu.com） */
   qrLoginSite: 'qrLoginSite',
-  /** 允许执行任务的开始时间（HH:mm 格式，默认 '10:00'） */
+  /**
+   * @deprecated 已被 allowedTimeRanges 取代；仅用于历史数据迁移与回滚兜底。
+   * 允许执行任务的开始时间（HH:mm 格式，默认 '10:00'）
+   */
   allowedTimeStart: 'allowedTimeStart',
-  /** 允许执行任务的结束时间（HH:mm 格式，默认 '21:00'） */
+  /**
+   * @deprecated 已被 allowedTimeRanges 取代；仅用于历史数据迁移与回滚兜底。
+   * 允许执行任务的结束时间（HH:mm 格式，默认 '21:00'）
+   */
   allowedTimeEnd: 'allowedTimeEnd',
+  /**
+   * 允许执行任务的时间区间列表：Array<{ start: 'HH:mm', end: 'HH:mm' }>。
+   * - 空数组 / 全部区间留空 → 不限制（全天可执行）
+   * - 单段：如 [{start:'10:00', end:'21:00'}]
+   * - 多段：如 [{start:'10:00', end:'13:00'}, {start:'14:00', end:'21:00'}]
+   * - 支持跨午夜：如 {start:'22:00', end:'06:00'}
+   * 旧的 allowedTimeStart/End 仅在首次加载时迁移到本字段。
+   */
+  allowedTimeRanges: 'allowedTimeRanges',
   /** 上次执行「日历日临时数据清理」的日期 YYYY-MM-DD；与当日相同时跳过 */
   autoTaskLastDailyPruneDate: 'autoTaskLastDailyPruneDate',
 } as const;
@@ -183,6 +198,7 @@ export const PERSIST_KEYS = {
   qrLoginSite: STORAGE_KEYS.qrLoginSite,
   allowedTimeStart: STORAGE_KEYS.allowedTimeStart,
   allowedTimeEnd: STORAGE_KEYS.allowedTimeEnd,
+  allowedTimeRanges: STORAGE_KEYS.allowedTimeRanges,
   autoTaskLastDailyPruneDate: STORAGE_KEYS.autoTaskLastDailyPruneDate,
 } as const;
 
@@ -336,4 +352,34 @@ export const QR_LOGIN_DEFAULT_MAX = 200;
 
 export function isLoginMode(v: unknown): v is LoginMode {
   return v === 'sms' || v === 'qrcode';
+}
+
+// ---------- 可执行时间范围（多区间） ----------
+
+/** 单个可执行时间区间；start/end 均为 'HH:mm' 格式，空串视为该端不限制 */
+export interface AllowedTimeRange {
+  start: string;
+  end: string;
+}
+
+/** 老配置初次迁移时使用的默认单段窗口 */
+export const ALLOWED_TIME_RANGE_DEFAULT: AllowedTimeRange = { start: '10:00', end: '21:00' };
+
+/** 全新装/未迁移用户的默认 ranges（仅含一段，等同旧默认） */
+export const ALLOWED_TIME_RANGES_DEFAULT: AllowedTimeRange[] = [{ ...ALLOWED_TIME_RANGE_DEFAULT }];
+
+/** 类型保护：从 storage 读出的任意值安全归一化为 AllowedTimeRange[] */
+export function normalizeAllowedTimeRanges(raw: unknown): AllowedTimeRange[] {
+  if (!Array.isArray(raw)) return [];
+  const out: AllowedTimeRange[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const s = (item as any).start;
+    const e = (item as any).end;
+    out.push({
+      start: typeof s === 'string' ? s : '',
+      end: typeof e === 'string' ? e : '',
+    });
+  }
+  return out;
 }
