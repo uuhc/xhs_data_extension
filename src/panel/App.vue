@@ -8,10 +8,13 @@ import {
   SEARCH_TRIGGER_MODE_DEFAULT,
   SEARCH_TRIGGER_MODE_LABEL,
   SEARCH_TRIGGER_MODE_DESC,
+  ALLOWED_TIME_RANGES_DEFAULT,
+  normalizeAllowedTimeRanges,
   type SearchTriggerMode,
+  type AllowedTimeRange,
 } from '@shared/constants';
 import { storage } from '@shared/storage';
-import { getNextAllowedChangeSeconds } from '@shared/time';
+import { getNextAllowedChangeSecondsForRanges } from '@shared/time';
 import ApiConfigSection from './components/ApiConfigSection.vue';
 import AccountSection from './components/AccountSection.vue';
 import AccountActions from './components/AccountActions.vue';
@@ -76,8 +79,14 @@ const taskRunning = useStorageRef<boolean>(STORAGE_KEYS.autoTaskRunning, false);
 const taskStatus = useStorageRef<string>(STORAGE_KEYS.autoTaskStatus, '');
 const countdownRemainSec = useStorageRef<number>(STORAGE_KEYS.countdownRemainSec, 0);
 const autoTaskSessionStartAt = useStorageRef<number>(STORAGE_KEYS.autoTaskSessionStartAt, 0);
-const allowedTimeStart = useStorageRef<string>(STORAGE_KEYS.allowedTimeStart, '10:00');
-const allowedTimeEnd = useStorageRef<string>(STORAGE_KEYS.allowedTimeEnd, '21:00');
+const allowedTimeRanges = useStorageRef<AllowedTimeRange[]>(
+  STORAGE_KEYS.allowedTimeRanges,
+  ALLOWED_TIME_RANGES_DEFAULT,
+  { transform: (raw) => {
+    const arr = normalizeAllowedTimeRanges(raw);
+    return arr.length > 0 ? arr : ALLOWED_TIME_RANGES_DEFAULT.map((r) => ({ ...r }));
+  } },
+);
 const callbackDailyStats = useStorageRef<Record<string, { ok: number; fail: number }>>(
   STORAGE_KEYS.callbackDailyStats,
   {},
@@ -375,13 +384,16 @@ function formatHms(totalSec: number): string {
 
 const nextWorkCard = computed(() => {
   void nowTick.value;
-  const start = allowedTimeStart.value || '10:00';
-  const end = allowedTimeEnd.value || '21:00';
-  const r = getNextAllowedChangeSeconds(start, end);
+  const ranges = allowedTimeRanges.value || [];
+  const r = getNextAllowedChangeSecondsForRanges(ranges);
   if (r.inRange) return null;
+  // 多段：把每段 start-end 拼成 "10:00-13:00 / 14:00-21:00" 形式展示
+  const label = ranges
+    .map((x) => `${x.start || ''}-${x.end || ''}`)
+    .filter((x) => x !== '-')
+    .join(' / ');
   return {
-    start,
-    end,
+    rangesLabel: label,
     label: formatHms(Math.max(0, r.nextChangeSeconds)),
   };
 });
@@ -598,7 +610,7 @@ function reloadExtension() {
     <div
       v-if="nextWorkCard"
       class="flex items-center gap-2 mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800"
-      :title="`允许执行时间窗口 ${nextWorkCard.start}-${nextWorkCard.end}`"
+      :title="`允许执行时间窗口 ${nextWorkCard.rangesLabel}`"
     >
       <svg
         xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
@@ -612,8 +624,8 @@ function reloadExtension() {
       <span class="text-amber-600/80 shrink-0">·</span>
       <span class="shrink-0">距开工</span>
       <span class="font-mono font-semibold text-amber-900">{{ nextWorkCard.label }}</span>
-      <span class="ml-auto text-amber-700/80 text-[11px] shrink-0 font-mono">
-        {{ nextWorkCard.start }}-{{ nextWorkCard.end }}
+      <span class="ml-auto text-amber-700/80 text-[11px] shrink-0 font-mono truncate max-w-[50%]">
+        {{ nextWorkCard.rangesLabel }}
       </span>
     </div>
 
